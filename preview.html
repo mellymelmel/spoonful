@@ -1,0 +1,1017 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <title>Case Dashboard — Preview</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #f6f8fa;
+    --surface: #ffffff;
+    --border: #e1e4e8;
+    --text: #24292e;
+    --muted: #6a737d;
+    --primary: #0969da;
+    --primary-hover: #0550ae;
+    --danger: #cf222e;
+    --success: #1a7f37;
+    --shadow: 0 1px 3px rgba(0,0,0,.06), 0 4px 12px rgba(0,0,0,.05);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+  }
+  h1, h2 { margin: 0; }
+  .topbar {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 20px 0;
+    position: sticky; top: 0; z-index: 5;
+  }
+  .topbar .top-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .topbar h1 { font-size: 18px; }
+  .preview-banner {
+    background: #fff8c5; color: #59450c; border: 1px solid #d4a72c;
+    padding: 4px 10px; border-radius: 6px; font-size: 12px;
+  }
+  .tabs { display: flex; gap: 4px; }
+  .tab {
+    background: none; border: none; padding: 10px 16px;
+    font: inherit; color: var(--muted); cursor: pointer;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+
+  main { padding: 20px; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  .toolbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
+  .toolbar input[type="text"], .toolbar select {
+    padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface); font: inherit;
+  }
+  .toolbar input[type="text"] { flex: 1; min-width: 200px; }
+
+  button {
+    padding: 7px 14px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface); cursor: pointer; font: inherit;
+  }
+  button:hover { background: #f3f4f6; }
+  button.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+  button.primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+  button.ghost { background: transparent; }
+  button.danger { color: var(--danger); border-color: transparent; padding: 4px 8px; }
+  button.danger:hover { background: #ffebe9; }
+  button.icon { padding: 4px 8px; border-color: transparent; }
+  button.icon:hover { background: #f3f4f6; }
+
+  .table-wrap {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    overflow: auto; box-shadow: var(--shadow);
+  }
+  table { width: 100%; border-collapse: collapse; }
+  th, td {
+    padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th { background: #f6f8fa; font-weight: 600; font-size: 12px; text-transform: uppercase; color: var(--muted); letter-spacing: .03em; white-space: nowrap; }
+  tbody tr:hover { background: #f6f8fa; }
+  tbody tr:last-child td { border-bottom: none; }
+  td a { color: var(--primary); text-decoration: none; word-break: break-all; }
+  td a:hover { text-decoration: underline; }
+  .initials-pill {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    background: #ddf4ff; color: #0550ae; font-weight: 600; font-size: 12px;
+  }
+  .initials-pill.missing { background: #ffebe9; color: var(--danger); }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .row-actions { white-space: nowrap; text-align: right; }
+
+  .empty { text-align: center; color: var(--muted); padding: 32px; }
+
+  .settings-grid { display: grid; gap: 20px; grid-template-columns: 1fr; }
+  @media (min-width: 980px) { .settings-grid { grid-template-columns: 1fr 1fr; } }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px; box-shadow: var(--shadow);
+  }
+  .card h2 { font-size: 16px; margin-bottom: 12px; }
+  .inline-form { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .inline-form input, .inline-form select {
+    padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface); font: inherit; flex: 1; min-width: 110px;
+  }
+  .inline-form input[disabled] { background: #f3f4f6; color: var(--muted); }
+  .settings-table th { font-size: 11px; }
+  .settings-table td input[type="text"] {
+    width: 100%; padding: 6px 8px; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--surface); font: inherit;
+  }
+  .settings-table tr[data-editing="true"] { background: #fff8c5; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12px; }
+  .hidden { display: none !important; }
+
+  .modal {
+    position: fixed; inset: 0; background: rgba(0,0,0,.4);
+    display: flex; align-items: center; justify-content: center; z-index: 100;
+    padding: 20px;
+  }
+  .modal-content {
+    background: var(--surface); border-radius: 8px; padding: 20px;
+    width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto;
+    box-shadow: 0 10px 40px rgba(0,0,0,.2);
+  }
+  .modal-content h2 { margin-bottom: 16px; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .03em; }
+  .field input, .field select, .field textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--border);
+    border-radius: 6px; font: inherit; background: var(--surface);
+  }
+
+  .toast {
+    position: fixed; bottom: 20px; right: 20px; padding: 10px 16px;
+    background: var(--text); color: #fff; border-radius: 6px;
+    box-shadow: var(--shadow); z-index: 200;
+  }
+  .toast.error { background: var(--danger); }
+  .toast.success { background: var(--success); }
+  .loader {
+    position: fixed; inset: 0; background: rgba(255,255,255,.6);
+    display: flex; align-items: center; justify-content: center; z-index: 150;
+  }
+  .spinner {
+    width: 36px; height: 36px; border: 3px solid #d0d7de;
+    border-top-color: var(--primary); border-radius: 50%;
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="top-row">
+      <h1>Case Dashboard</h1>
+      <div>
+        <span class="preview-banner">Preview · localStorage backend</span>
+        <button id="reset-preview" class="ghost" title="Wipe preview data">Reset</button>
+      </div>
+    </div>
+    <nav class="tabs">
+      <button class="tab active" data-tab="cases">Cases</button>
+      <button class="tab" data-tab="settings">Settings</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="cases" class="panel active">
+      <div class="toolbar">
+        <input type="text" id="filter" placeholder="Filter cases...">
+        <select id="filter-initials">
+          <option value="">All team members</option>
+        </select>
+        <button id="add-case-btn" class="primary">+ Add Case</button>
+      </div>
+
+      <div class="table-wrap">
+        <table id="cases-table">
+          <thead><tr id="cases-head"></tr></thead>
+          <tbody id="cases-body"></tbody>
+        </table>
+      </div>
+      <p id="cases-empty" class="empty hidden">No cases yet. Click "+ Add Case" to create one.</p>
+    </section>
+
+    <section id="settings" class="panel">
+      <div class="settings-grid">
+        <div class="card">
+          <h2>Team Members</h2>
+          <p class="muted small">Member ID is required and links cases to members. Initials and name are display labels.</p>
+          <form id="team-form" class="inline-form">
+            <input type="text" name="MemberId" placeholder="Member ID" required autocomplete="off">
+            <input type="text" name="Initials" placeholder="Initials" required maxlength="6" autocomplete="off">
+            <input type="text" name="Name" placeholder="Full name" required autocomplete="off">
+            <input type="text" name="Role" placeholder="Role" autocomplete="off">
+            <button type="submit" class="primary">Save</button>
+          </form>
+          <table class="settings-table">
+            <thead><tr><th>Member ID</th><th>Initials</th><th>Name</th><th>Role</th><th></th></tr></thead>
+            <tbody id="team-body"></tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h2>Custom Columns</h2>
+          <p class="muted small">"Member" and "Main Link" are built in. Add your own columns below.</p>
+          <form id="column-form" class="inline-form">
+            <input type="hidden" name="ColumnId" value="">
+            <input type="text" name="ColumnName" placeholder="Column name" required autocomplete="off">
+            <select name="ColumnType" id="column-type"></select>
+            <input type="text" name="Options" id="column-options" placeholder="Options (comma-separated)" autocomplete="off" disabled>
+            <button type="submit" class="primary">Save</button>
+            <button type="button" id="column-cancel" class="ghost hidden">Cancel</button>
+          </form>
+          <table class="settings-table">
+            <thead><tr><th>Order</th><th>Name</th><th>Type</th><th>Options</th><th></th></tr></thead>
+            <tbody id="columns-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="case-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content">
+      <h2 id="case-modal-title">Add Case</h2>
+      <form id="case-form">
+        <input type="hidden" name="ID" value="">
+        <div id="case-fields"></div>
+        <div class="modal-actions">
+          <button type="button" id="case-cancel" class="ghost">Cancel</button>
+          <button type="submit" class="primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <div id="loader" class="loader hidden"><div class="spinner"></div></div>
+
+<script>
+/* ===================================================================
+ * google.script.run shim — backs the same server-method names with an
+ * in-memory store persisted to localStorage. Lets you preview the UI
+ * without a Google Apps Script runtime or Sheets backend.
+ * =================================================================== */
+(function () {
+  const KEY = 'caseDashboardPreviewV1';
+  const COLUMN_TYPES = ['text', 'number', 'date', 'link', 'dropdown', 'checkbox'];
+  const FIXED_CASE_KEYS = ['ID', 'MemberId', 'MainLink'];
+
+  function uuid() {
+    return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
+      (c ^ (crypto.getRandomValues(new Uint8Array(1))[0] & 15) >> (c / 4)).toString(16));
+  }
+
+  function load() {
+    const raw = localStorage.getItem(KEY);
+    if (raw) {
+      try { return JSON.parse(raw); } catch (e) { /* fall through */ }
+    }
+    const seed = {
+      cases: [
+        { ID: uuid(), MemberId: 'M001', MainLink: 'https://example.com/case/123', Status: 'Open', Priority: 'High' },
+        { ID: uuid(), MemberId: 'M002', MainLink: 'https://example.com/case/124', Status: 'In Review', Priority: 'Medium' },
+        { ID: uuid(), MemberId: 'M001', MainLink: 'https://example.com/case/125', Status: 'Closed', Priority: 'Low' }
+      ],
+      team: [
+        { MemberId: 'M001', Initials: 'AB', Name: 'Alice Brown', Role: 'Investigator' },
+        { MemberId: 'M002', Initials: 'CD', Name: 'Carlos Diaz', Role: 'Analyst' },
+        { MemberId: 'M003', Initials: 'EF', Name: 'Erin Foster', Role: 'Lead' }
+      ],
+      columns: [
+        { ColumnId: uuid(), ColumnName: 'Status', ColumnType: 'dropdown', Options: 'Open, In Review, Closed', Order: 0 },
+        { ColumnId: uuid(), ColumnName: 'Priority', ColumnType: 'dropdown', Options: 'Low, Medium, High', Order: 1 }
+      ]
+    };
+    save(seed);
+    return seed;
+  }
+  function save(db) { localStorage.setItem(KEY, JSON.stringify(db)); }
+
+  function customColumns() {
+    const db = load();
+    return db.columns.slice().sort((a, b) => (Number(a.Order) || 0) - (Number(b.Order) || 0));
+  }
+
+  const handlers = {
+    getDashboardData() {
+      return {
+        cases: handlers.getCases(),
+        team: handlers.getTeamMembers(),
+        columns: handlers.getCustomColumns(),
+        columnTypes: COLUMN_TYPES
+      };
+    },
+    getCases() { return load().cases.slice(); },
+    getTeamMembers() { return load().team.slice(); },
+    getCustomColumns() { return customColumns(); },
+
+    addCase(payload) {
+      const db = load();
+      const id = payload.ID || uuid();
+      const allowed = FIXED_CASE_KEYS.concat(db.columns.map(c => c.ColumnName));
+      const row = { ID: id };
+      allowed.forEach(k => { if (k !== 'ID') row[k] = payload[k] != null ? payload[k] : ''; });
+      db.cases.push(row);
+      save(db);
+      return { ok: true, id };
+    },
+    updateCase(payload) {
+      if (!payload || !payload.ID) throw new Error('updateCase requires ID');
+      const db = load();
+      const idx = db.cases.findIndex(c => String(c.ID) === String(payload.ID));
+      if (idx === -1) throw new Error('Case not found: ' + payload.ID);
+      const allowed = FIXED_CASE_KEYS.concat(db.columns.map(c => c.ColumnName));
+      const merged = Object.assign({}, db.cases[idx]);
+      allowed.forEach(k => { if (k in payload) merged[k] = payload[k]; });
+      db.cases[idx] = merged;
+      save(db);
+      return { ok: true };
+    },
+    deleteCase(id) {
+      const db = load();
+      db.cases = db.cases.filter(c => String(c.ID) !== String(id));
+      save(db);
+      return { ok: true };
+    },
+
+    saveTeamMember(payload) {
+      if (!payload) throw new Error('payload required');
+      const memberId = String(payload.MemberId || '').trim();
+      const initials = String(payload.Initials || '').trim().toUpperCase();
+      const name = String(payload.Name || '').trim();
+      const role = String(payload.Role || '').trim();
+      if (!memberId) throw new Error('MemberId is required');
+      if (!initials) throw new Error('Initials are required');
+      if (!name) throw new Error('Name is required');
+      const db = load();
+      const idx = db.team.findIndex(t => String(t.MemberId).trim() === memberId);
+      if (idx === -1) db.team.push({ MemberId: memberId, Initials: initials, Name: name, Role: role });
+      else db.team[idx] = { MemberId: memberId, Initials: initials, Name: name, Role: role };
+      save(db);
+      return { ok: true };
+    },
+    updateTeamMember(payload) {
+      if (!payload || !payload.OriginalMemberId) throw new Error('updateTeamMember requires OriginalMemberId');
+      const original = String(payload.OriginalMemberId).trim();
+      const newId = String(payload.MemberId || '').trim();
+      const initials = String(payload.Initials || '').trim().toUpperCase();
+      const name = String(payload.Name || '').trim();
+      const role = String(payload.Role || '').trim();
+      if (!newId) throw new Error('MemberId is required');
+      if (!initials) throw new Error('Initials are required');
+      if (!name) throw new Error('Name is required');
+      const db = load();
+      const idx = db.team.findIndex(t => String(t.MemberId).trim() === original);
+      if (idx === -1) throw new Error('Team member not found: ' + original);
+      if (original !== newId && db.team.some(t => String(t.MemberId).trim() === newId)) {
+        throw new Error('A team member with MemberId "' + newId + '" already exists');
+      }
+      db.team[idx] = { MemberId: newId, Initials: initials, Name: name, Role: role };
+      if (original !== newId) {
+        db.cases = db.cases.map(c => String(c.MemberId).trim() === original ? Object.assign({}, c, { MemberId: newId }) : c);
+      }
+      save(db);
+      return { ok: true };
+    },
+    deleteTeamMember(memberId) {
+      const target = String(memberId).trim();
+      const db = load();
+      db.team = db.team.filter(t => String(t.MemberId).trim() !== target);
+      save(db);
+      return { ok: true };
+    },
+
+    saveColumn(payload) {
+      if (!payload || !payload.ColumnName) throw new Error('ColumnName is required');
+      const type = String(payload.ColumnType || 'text').toLowerCase();
+      if (COLUMN_TYPES.indexOf(type) === -1) throw new Error('Invalid column type: ' + type);
+      const name = String(payload.ColumnName).trim();
+      if (['ID', 'MemberId', 'MainLink'].indexOf(name) !== -1) {
+        throw new Error('Column name conflicts with a built-in column');
+      }
+      const db = load();
+      const id = payload.ColumnId || uuid();
+      const order = payload.Order != null && payload.Order !== '' ? Number(payload.Order) : db.columns.length;
+      const options = String(payload.Options || '').trim();
+      const idx = db.columns.findIndex(c => c.ColumnId === id);
+      if (idx === -1) db.columns.push({ ColumnId: id, ColumnName: name, ColumnType: type, Options: options, Order: order });
+      else {
+        const oldName = db.columns[idx].ColumnName;
+        db.columns[idx] = { ColumnId: id, ColumnName: name, ColumnType: type, Options: options, Order: order };
+        if (oldName !== name) {
+          db.cases = db.cases.map(c => {
+            if (oldName in c) { const v = c[oldName]; const n = Object.assign({}, c); delete n[oldName]; n[name] = v; return n; }
+            return c;
+          });
+        }
+      }
+      save(db);
+      return { ok: true, id };
+    },
+    deleteColumn(columnId) {
+      const db = load();
+      const col = db.columns.find(c => c.ColumnId === String(columnId));
+      db.columns = db.columns.filter(c => c.ColumnId !== String(columnId));
+      if (col) {
+        db.cases = db.cases.map(c => { const n = Object.assign({}, c); delete n[col.ColumnName]; return n; });
+      }
+      save(db);
+      return { ok: true };
+    },
+    reorderColumns(orderedIds) {
+      const db = load();
+      db.columns = db.columns.map(c => {
+        const idx = orderedIds.indexOf(String(c.ColumnId));
+        return Object.assign({}, c, { Order: idx === -1 ? 999 : idx });
+      });
+      save(db);
+      return { ok: true };
+    }
+  };
+
+  function makeRunner() {
+    let onSuccess = () => {};
+    let onFailure = (e) => { throw e; };
+    const proxy = new Proxy({}, {
+      get(_, prop) {
+        if (prop === 'withSuccessHandler') return (fn) => { onSuccess = fn || onSuccess; return proxy; };
+        if (prop === 'withFailureHandler') return (fn) => { onFailure = fn || onFailure; return proxy; };
+        return (...args) => {
+          const fn = handlers[prop];
+          setTimeout(() => {
+            if (!fn) return onFailure(new Error('Unknown server method: ' + String(prop)));
+            try { onSuccess(fn.apply(null, args)); }
+            catch (e) { onFailure(e); }
+          }, 80);
+          return proxy;
+        };
+      }
+    });
+    return proxy;
+  }
+
+  window.google = window.google || {};
+  window.google.script = window.google.script || {};
+  Object.defineProperty(window.google.script, 'run', { get: makeRunner });
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('reset-preview');
+    if (btn) btn.addEventListener('click', () => {
+      if (!confirm('Wipe preview data and reload?')) return;
+      localStorage.removeItem(KEY);
+      location.reload();
+    });
+  });
+})();
+</script>
+
+<script>
+  const state = {
+    cases: [],
+    team: [],
+    columns: [],
+    columnTypes: ['text', 'number', 'date', 'link', 'dropdown', 'checkbox'],
+    filterText: '',
+    filterMemberId: ''
+  };
+
+  function memberById(id) {
+    if (id == null || id === '') return null;
+    const target = String(id).trim();
+    return state.team.find(t => String(t.MemberId).trim() === target) || null;
+  }
+
+  function call(method, ...args) {
+    showLoader(true);
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(r => { showLoader(false); resolve(r); })
+        .withFailureHandler(e => { showLoader(false); reject(e); })
+        [method](...args);
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    bindTabs();
+    bindCaseModal();
+    bindTeamForm();
+    bindColumnForm();
+    bindFilters();
+    try {
+      const data = await call('getDashboardData');
+      applyData(data);
+    } catch (e) {
+      toast('Failed to load: ' + (e.message || e), 'error');
+    }
+  });
+
+  function applyData(data) {
+    state.cases = data.cases || [];
+    state.team = data.team || [];
+    state.columns = data.columns || [];
+    state.columnTypes = data.columnTypes || state.columnTypes;
+    renderAll();
+  }
+
+  function renderAll() {
+    renderCases();
+    renderTeam();
+    renderColumns();
+    renderInitialsFilter();
+    renderColumnTypeOptions();
+  }
+
+  function bindTabs() {
+    document.querySelectorAll('.tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        btn.classList.add('active');
+        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+        document.getElementById(btn.dataset.tab).classList.add('active');
+      });
+    });
+  }
+
+  function caseColumns() {
+    return [
+      { key: 'MemberId', label: 'Member', type: 'member' },
+      { key: 'MainLink', label: 'Main Link', type: 'link' },
+      ...state.columns.map(c => ({
+        key: c.ColumnName,
+        label: c.ColumnName,
+        type: String(c.ColumnType || 'text').toLowerCase(),
+        options: c.Options
+      }))
+    ];
+  }
+
+  function renderCases() {
+    const cols = caseColumns();
+    const head = document.getElementById('cases-head');
+    head.innerHTML = cols.map(c => `<th>${escapeHtml(c.label)}</th>`).join('') + '<th></th>';
+
+    const filterText = state.filterText.toLowerCase();
+    const filtered = state.cases.filter(row => {
+      if (state.filterMemberId && String(row.MemberId || '').trim() !== state.filterMemberId) return false;
+      if (!filterText) return true;
+      const member = memberById(row.MemberId);
+      const memberText = member ? `${member.Initials} ${member.Name}` : '';
+      return Object.values(row).concat(memberText).some(v => String(v || '').toLowerCase().includes(filterText));
+    });
+
+    const body = document.getElementById('cases-body');
+    body.innerHTML = filtered.map(row => {
+      const cells = cols.map(c => `<td>${renderCell(c, row[c.key])}</td>`).join('');
+      const actions = `<td class="row-actions">
+        <button class="icon" title="Edit" data-action="edit" data-id="${escapeAttr(row.ID)}">&#9998;</button>
+        <button class="danger" title="Delete" data-action="delete" data-id="${escapeAttr(row.ID)}">&#10005;</button>
+      </td>`;
+      return `<tr>${cells}${actions}</tr>`;
+    }).join('');
+
+    document.getElementById('cases-empty').classList.toggle('hidden', state.cases.length > 0);
+
+    body.querySelectorAll('button[data-action]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        if (btn.dataset.action === 'edit') openCaseModal(state.cases.find(c => String(c.ID) === String(id)));
+        if (btn.dataset.action === 'delete') confirmDeleteCase(id);
+      });
+    });
+  }
+
+  function renderCell(col, value) {
+    if (col.type === 'member') {
+      const member = memberById(value);
+      if (!member) {
+        return value ? `<span class="initials-pill missing" title="Unknown member">${escapeHtml(value)}</span>` : '';
+      }
+      const title = `${member.Name}${member.Role ? ' — ' + member.Role : ''}`;
+      return `<span class="initials-pill" title="${escapeAttr(title)}">${escapeHtml(member.Initials)}</span>`;
+    }
+    if (value == null || value === '') return '';
+    if (col.type === 'link') {
+      const href = String(value);
+      const safe = /^https?:\/\//i.test(href) ? href : 'https://' + href;
+      return `<a href="${escapeAttr(safe)}" target="_blank" rel="noopener">${escapeHtml(value)}</a>`;
+    }
+    if (col.type === 'checkbox') {
+      const truthy = value === true || value === 'true' || value === 'TRUE' || value === 1 || value === '1';
+      return truthy ? '&#9989;' : '';
+    }
+    if (col.type === 'date' && value) {
+      const d = new Date(value);
+      if (!isNaN(d)) return d.toLocaleDateString();
+    }
+    return escapeHtml(String(value));
+  }
+
+  function renderInitialsFilter() {
+    const sel = document.getElementById('filter-initials');
+    const current = sel.value;
+    const opts = state.team.map(t =>
+      `<option value="${escapeAttr(t.MemberId)}">${escapeHtml(t.Initials)} — ${escapeHtml(t.Name || '')}</option>`
+    ).join('');
+    sel.innerHTML = '<option value="">All team members</option>' + opts;
+    if (current) sel.value = current;
+  }
+
+  function bindFilters() {
+    document.getElementById('filter').addEventListener('input', e => {
+      state.filterText = e.target.value;
+      renderCases();
+    });
+    document.getElementById('filter-initials').addEventListener('change', e => {
+      state.filterMemberId = e.target.value.trim();
+      renderCases();
+    });
+  }
+
+  function bindCaseModal() {
+    document.getElementById('add-case-btn').addEventListener('click', () => openCaseModal(null));
+    document.getElementById('case-cancel').addEventListener('click', closeCaseModal);
+    document.getElementById('case-form').addEventListener('submit', onCaseSubmit);
+    document.getElementById('case-modal').addEventListener('click', e => {
+      if (e.target.id === 'case-modal') closeCaseModal();
+    });
+  }
+
+  function openCaseModal(existing) {
+    const form = document.getElementById('case-form');
+    form.reset();
+    document.getElementById('case-modal-title').textContent = existing ? 'Edit Case' : 'Add Case';
+    form.elements.ID.value = existing ? existing.ID : '';
+    const fields = document.getElementById('case-fields');
+    fields.innerHTML = caseColumns().map(c => fieldHtml(c, existing ? existing[c.key] : '')).join('');
+    document.getElementById('case-modal').classList.remove('hidden');
+  }
+
+  function fieldHtml(col, value) {
+    const v = value == null ? '' : String(value);
+    if (col.type === 'member') {
+      const opts = state.team.map(t =>
+        `<option value="${escapeAttr(t.MemberId)}" ${String(t.MemberId) === v ? 'selected' : ''}>${escapeHtml(t.Initials)} — ${escapeHtml(t.Name || '')}</option>`
+      ).join('');
+      return `<div class="field"><label>${escapeHtml(col.label)}</label>
+        <select name="${escapeAttr(col.key)}" required><option value="">Select team member...</option>${opts}</select></div>`;
+    }
+    if (col.type === 'dropdown') {
+      const choices = String(col.options || '').split(',').map(s => s.trim()).filter(Boolean);
+      const opts = choices.map(o => `<option value="${escapeAttr(o)}" ${o === v ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('');
+      return `<div class="field"><label>${escapeHtml(col.label)}</label>
+        <select name="${escapeAttr(col.key)}"><option value="">—</option>${opts}</select></div>`;
+    }
+    if (col.type === 'date') {
+      const dv = v ? new Date(v) : null;
+      const iso = dv && !isNaN(dv) ? dv.toISOString().slice(0, 10) : '';
+      return `<div class="field"><label>${escapeHtml(col.label)}</label>
+        <input type="date" name="${escapeAttr(col.key)}" value="${escapeAttr(iso)}"></div>`;
+    }
+    if (col.type === 'number') {
+      return `<div class="field"><label>${escapeHtml(col.label)}</label>
+        <input type="number" step="any" name="${escapeAttr(col.key)}" value="${escapeAttr(v)}"></div>`;
+    }
+    if (col.type === 'checkbox') {
+      const checked = v === 'true' || v === 'TRUE' || v === '1' || v === 'on' || value === true;
+      return `<div class="field"><label>${escapeHtml(col.label)}</label>
+        <input type="checkbox" name="${escapeAttr(col.key)}" ${checked ? 'checked' : ''}></div>`;
+    }
+    if (col.type === 'link' || col.key === 'MainLink') {
+      return `<div class="field"><label>${escapeHtml(col.label)}</label>
+        <input type="url" name="${escapeAttr(col.key)}" value="${escapeAttr(v)}" placeholder="https://..."></div>`;
+    }
+    return `<div class="field"><label>${escapeHtml(col.label)}</label>
+      <input type="text" name="${escapeAttr(col.key)}" value="${escapeAttr(v)}"></div>`;
+  }
+
+  function closeCaseModal() {
+    document.getElementById('case-modal').classList.add('hidden');
+  }
+
+  async function onCaseSubmit(e) {
+    e.preventDefault();
+    const form = e.target;
+    const payload = {};
+    caseColumns().forEach(c => {
+      const el = form.elements[c.key];
+      if (!el) return;
+      if (el.type === 'checkbox') payload[c.key] = el.checked;
+      else payload[c.key] = el.value;
+    });
+    if (form.elements.ID.value) payload.ID = form.elements.ID.value;
+    try {
+      if (payload.ID) {
+        await call('updateCase', payload);
+        toast('Case updated', 'success');
+      } else {
+        await call('addCase', payload);
+        toast('Case added', 'success');
+      }
+      closeCaseModal();
+      state.cases = await call('getCases');
+      renderCases();
+    } catch (err) {
+      toast('Save failed: ' + (err.message || err), 'error');
+    }
+  }
+
+  async function confirmDeleteCase(id) {
+    if (!confirm('Delete this case?')) return;
+    try {
+      await call('deleteCase', id);
+      state.cases = state.cases.filter(c => String(c.ID) !== String(id));
+      renderCases();
+      toast('Deleted', 'success');
+    } catch (err) {
+      toast('Delete failed: ' + (err.message || err), 'error');
+    }
+  }
+
+  function bindTeamForm() {
+    document.getElementById('team-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const payload = {
+        MemberId: fd.get('MemberId'),
+        Initials: fd.get('Initials'),
+        Name: fd.get('Name'),
+        Role: fd.get('Role')
+      };
+      try {
+        await call('saveTeamMember', payload);
+        e.target.reset();
+        state.team = await call('getTeamMembers');
+        renderTeam();
+        renderInitialsFilter();
+        toast('Saved', 'success');
+      } catch (err) {
+        toast('Save failed: ' + (err.message || err), 'error');
+      }
+    });
+  }
+
+  function renderTeam() {
+    const body = document.getElementById('team-body');
+    if (!state.team.length) {
+      body.innerHTML = '<tr><td colspan="5" class="empty">No team members yet.</td></tr>';
+      return;
+    }
+    body.innerHTML = state.team.map(t => teamRowHtml(t, false)).join('');
+    bindTeamRowEvents();
+  }
+
+  function teamRowHtml(t, editing) {
+    const key = escapeAttr(t.MemberId);
+    if (editing) {
+      return `
+        <tr data-key="${key}" data-editing="true">
+          <td><input type="text" data-field="MemberId" value="${escapeAttr(t.MemberId)}" required></td>
+          <td><input type="text" data-field="Initials" value="${escapeAttr(t.Initials)}" maxlength="6" required style="width:80px"></td>
+          <td><input type="text" data-field="Name" value="${escapeAttr(t.Name || '')}" required></td>
+          <td><input type="text" data-field="Role" value="${escapeAttr(t.Role || '')}"></td>
+          <td class="row-actions">
+            <button class="primary" data-action="save-team" data-key="${key}">Save</button>
+            <button class="ghost" data-action="cancel-team" data-key="${key}">Cancel</button>
+          </td>
+        </tr>`;
+    }
+    return `
+      <tr data-key="${key}">
+        <td><code class="muted small">${escapeHtml(t.MemberId)}</code></td>
+        <td><span class="initials-pill">${escapeHtml(t.Initials)}</span></td>
+        <td>${escapeHtml(t.Name || '')}</td>
+        <td>${escapeHtml(t.Role || '')}</td>
+        <td class="row-actions">
+          <button class="icon" data-action="edit-team" data-key="${key}" title="Edit">&#9998;</button>
+          <button class="danger" data-action="delete-team" data-key="${key}" title="Delete">&#10005;</button>
+        </td>
+      </tr>`;
+  }
+
+  function bindTeamRowEvents() {
+    const body = document.getElementById('team-body');
+    body.querySelectorAll('button[data-action]').forEach(btn => {
+      btn.addEventListener('click', () => handleTeamAction(btn.dataset.action, btn.dataset.key));
+    });
+    body.querySelectorAll('tr[data-editing="true"] input').forEach(inp => {
+      inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const row = inp.closest('tr');
+          handleTeamAction('save-team', row.dataset.key);
+        } else if (e.key === 'Escape') {
+          const row = inp.closest('tr');
+          handleTeamAction('cancel-team', row.dataset.key);
+        }
+      });
+    });
+    const firstInput = body.querySelector('tr[data-editing="true"] input[data-field="MemberId"]');
+    if (firstInput) firstInput.focus();
+  }
+
+  async function handleTeamAction(action, key) {
+    const member = state.team.find(t => String(t.MemberId) === String(key));
+    if (action === 'edit-team') {
+      const body = document.getElementById('team-body');
+      body.querySelectorAll('tr[data-editing="true"]').forEach(tr => {
+        const orig = state.team.find(t => String(t.MemberId) === String(tr.dataset.key));
+        if (orig) tr.outerHTML = teamRowHtml(orig, false);
+      });
+      const row = body.querySelector(`tr[data-key="${cssEscape(key)}"]`);
+      if (row && member) row.outerHTML = teamRowHtml(member, true);
+      bindTeamRowEvents();
+      return;
+    }
+    if (action === 'cancel-team') {
+      const row = document.querySelector(`#team-body tr[data-key="${cssEscape(key)}"]`);
+      if (row && member) row.outerHTML = teamRowHtml(member, false);
+      bindTeamRowEvents();
+      return;
+    }
+    if (action === 'save-team') {
+      const row = document.querySelector(`#team-body tr[data-key="${cssEscape(key)}"][data-editing="true"]`);
+      if (!row) return;
+      const newMemberId = row.querySelector('[data-field="MemberId"]').value.trim();
+      const newInitials = row.querySelector('[data-field="Initials"]').value.trim();
+      const newName = row.querySelector('[data-field="Name"]').value.trim();
+      const newRole = row.querySelector('[data-field="Role"]').value.trim();
+      if (!newMemberId || !newInitials || !newName) {
+        toast('Member ID, Initials, and Name are required', 'error');
+        return;
+      }
+      try {
+        await call('updateTeamMember', {
+          OriginalMemberId: key,
+          MemberId: newMemberId,
+          Initials: newInitials,
+          Name: newName,
+          Role: newRole
+        });
+        const data = await call('getDashboardData');
+        applyData(data);
+        toast('Updated', 'success');
+      } catch (err) {
+        toast('Update failed: ' + (err.message || err), 'error');
+      }
+      return;
+    }
+    if (action === 'delete-team') {
+      if (!confirm('Remove this member? Cases linked to them will keep their MemberId until reassigned.')) return;
+      try {
+        await call('deleteTeamMember', key);
+        state.team = state.team.filter(t => String(t.MemberId) !== String(key));
+        renderTeam();
+        renderInitialsFilter();
+        toast('Removed', 'success');
+      } catch (err) {
+        toast('Delete failed: ' + (err.message || err), 'error');
+      }
+    }
+  }
+
+  function cssEscape(s) {
+    if (window.CSS && CSS.escape) return CSS.escape(s);
+    return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+  }
+
+  function renderColumnTypeOptions() {
+    const sel = document.getElementById('column-type');
+    sel.innerHTML = state.columnTypes.map(t => `<option value="${escapeAttr(t)}">${escapeHtml(t)}</option>`).join('');
+    toggleOptionsField();
+  }
+
+  function toggleOptionsField() {
+    const type = document.getElementById('column-type').value;
+    const opts = document.getElementById('column-options');
+    opts.disabled = type !== 'dropdown';
+    if (type !== 'dropdown') opts.value = '';
+  }
+
+  function bindColumnForm() {
+    document.getElementById('column-type').addEventListener('change', toggleOptionsField);
+    document.getElementById('column-cancel').addEventListener('click', resetColumnForm);
+    document.getElementById('column-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const payload = {
+        ColumnId: fd.get('ColumnId') || null,
+        ColumnName: fd.get('ColumnName'),
+        ColumnType: fd.get('ColumnType'),
+        Options: fd.get('Options') || ''
+      };
+      try {
+        await call('saveColumn', payload);
+        resetColumnForm();
+        const data = await call('getDashboardData');
+        applyData(data);
+        toast('Column saved', 'success');
+      } catch (err) {
+        toast('Save failed: ' + (err.message || err), 'error');
+      }
+    });
+  }
+
+  function resetColumnForm() {
+    const f = document.getElementById('column-form');
+    f.reset();
+    f.elements.ColumnId.value = '';
+    document.getElementById('column-cancel').classList.add('hidden');
+    toggleOptionsField();
+  }
+
+  function startEditColumn(col) {
+    const f = document.getElementById('column-form');
+    f.elements.ColumnId.value = col.ColumnId;
+    f.elements.ColumnName.value = col.ColumnName;
+    f.elements.ColumnType.value = String(col.ColumnType || 'text').toLowerCase();
+    f.elements.Options.value = col.Options || '';
+    toggleOptionsField();
+    document.getElementById('column-cancel').classList.remove('hidden');
+    document.querySelector('[name="ColumnName"]').focus();
+  }
+
+  function renderColumns() {
+    const body = document.getElementById('columns-body');
+    if (!state.columns.length) {
+      body.innerHTML = '<tr><td colspan="5" class="empty">No custom columns yet.</td></tr>';
+      return;
+    }
+    body.innerHTML = state.columns.map((c, i) => `
+      <tr>
+        <td>
+          <button class="icon" data-id="${escapeAttr(c.ColumnId)}" data-dir="up" title="Move up" ${i === 0 ? 'disabled' : ''}>&#8593;</button>
+          <button class="icon" data-id="${escapeAttr(c.ColumnId)}" data-dir="down" title="Move down" ${i === state.columns.length - 1 ? 'disabled' : ''}>&#8595;</button>
+        </td>
+        <td>${escapeHtml(c.ColumnName)}</td>
+        <td><span class="muted small">${escapeHtml(c.ColumnType)}</span></td>
+        <td><span class="muted small">${escapeHtml(c.Options || '')}</span></td>
+        <td class="row-actions">
+          <button class="icon" data-edit="${escapeAttr(c.ColumnId)}" title="Edit">&#9998;</button>
+          <button class="danger" data-delete="${escapeAttr(c.ColumnId)}" title="Delete">&#10005;</button>
+        </td>
+      </tr>
+    `).join('');
+
+    body.querySelectorAll('button[data-edit]').forEach(b => {
+      b.addEventListener('click', () => startEditColumn(state.columns.find(x => x.ColumnId === b.dataset.edit)));
+    });
+    body.querySelectorAll('button[data-delete]').forEach(b => {
+      b.addEventListener('click', async () => {
+        if (!confirm('Delete this column? Existing data in this column will be removed.')) return;
+        try {
+          await call('deleteColumn', b.dataset.delete);
+          const data = await call('getDashboardData');
+          applyData(data);
+          toast('Column deleted', 'success');
+        } catch (err) {
+          toast('Delete failed: ' + (err.message || err), 'error');
+        }
+      });
+    });
+    body.querySelectorAll('button[data-dir]').forEach(b => {
+      b.addEventListener('click', () => moveColumn(b.dataset.id, b.dataset.dir));
+    });
+  }
+
+  async function moveColumn(id, dir) {
+    const idx = state.columns.findIndex(c => c.ColumnId === id);
+    if (idx === -1) return;
+    const swap = dir === 'up' ? idx - 1 : idx + 1;
+    if (swap < 0 || swap >= state.columns.length) return;
+    const arr = state.columns.slice();
+    [arr[idx], arr[swap]] = [arr[swap], arr[idx]];
+    try {
+      await call('reorderColumns', arr.map(c => c.ColumnId));
+      const data = await call('getDashboardData');
+      applyData(data);
+    } catch (err) {
+      toast('Reorder failed: ' + (err.message || err), 'error');
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function escapeAttr(s) { return escapeHtml(s); }
+
+  let toastTimer = null;
+  function toast(msg, kind) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = 'toast' + (kind ? ' ' + kind : '');
+    el.classList.remove('hidden');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.add('hidden'), 2800);
+  }
+
+  let loaderCount = 0;
+  function showLoader(on) {
+    loaderCount += on ? 1 : -1;
+    if (loaderCount < 0) loaderCount = 0;
+    document.getElementById('loader').classList.toggle('hidden', loaderCount === 0);
+  }
+</script>
+</body>
+</html>
