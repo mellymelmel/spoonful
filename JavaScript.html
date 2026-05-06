@@ -1,0 +1,448 @@
+<script>
+  const state = {
+    cases: [],
+    team: [],
+    columns: [],
+    columnTypes: ['text', 'number', 'date', 'link', 'dropdown', 'checkbox'],
+    filterText: '',
+    filterInitials: ''
+  };
+
+  /* ---------- Server bridge ---------- */
+  function call(method, ...args) {
+    showLoader(true);
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(r => { showLoader(false); resolve(r); })
+        .withFailureHandler(e => { showLoader(false); reject(e); })
+        [method](...args);
+    });
+  }
+
+  /* ---------- Bootstrap ---------- */
+  document.addEventListener('DOMContentLoaded', async () => {
+    bindTabs();
+    bindCaseModal();
+    bindTeamForm();
+    bindColumnForm();
+    bindFilters();
+    try {
+      const data = await call('getDashboardData');
+      applyData(data);
+    } catch (e) {
+      toast('Failed to load: ' + (e.message || e), 'error');
+    }
+  });
+
+  function applyData(data) {
+    state.cases = data.cases || [];
+    state.team = data.team || [];
+    state.columns = data.columns || [];
+    state.columnTypes = data.columnTypes || state.columnTypes;
+    renderAll();
+  }
+
+  function renderAll() {
+    renderCases();
+    renderTeam();
+    renderColumns();
+    renderInitialsFilter();
+    renderColumnTypeOptions();
+  }
+
+  /* ---------- Tabs ---------- */
+  function bindTabs() {
+    document.querySelectorAll('.tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        btn.classList.add('active');
+        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+        document.getElementById(btn.dataset.tab).classList.add('active');
+      });
+    });
+  }
+
+  /* ---------- Cases rendering ---------- */
+  function caseColumns() {
+    return [
+      { key: 'Initials', label: 'Initials', type: 'initials' },
+      { key: 'MainLink', label: 'Main Link', type: 'link' },
+      ...state.columns.map(c => ({
+        key: c.ColumnName,
+        label: c.ColumnName,
+        type: String(c.ColumnType || 'text').toLowerCase(),
+        options: c.Options
+      }))
+    ];
+  }
+
+  function renderCases() {
+    const cols = caseColumns();
+    const head = document.getElementById('cases-head');
+    head.innerHTML = cols.map(c => `<th>${escapeHtml(c.label)}</th>`).join('') + '<th></th>';
+
+    const filterText = state.filterText.toLowerCase();
+    const filtered = state.cases.filter(row => {
+      if (state.filterInitials && String(row.Initials || '').toUpperCase() !== state.filterInitials) return false;
+      if (!filterText) return true;
+      return Object.values(row).some(v => String(v || '').toLowerCase().includes(filterText));
+    });
+
+    const body = document.getElementById('cases-body');
+    body.innerHTML = filtered.map(row => {
+      const cells = cols.map(c => `<td>${renderCell(c, row[c.key])}</td>`).join('');
+      const actions = `<td class="row-actions">
+        <button class="icon" title="Edit" data-action="edit" data-id="${escapeAttr(row.ID)}">&#9998;</button>
+        <button class="danger" title="Delete" data-action="delete" data-id="${escapeAttr(row.ID)}">&#10005;</button>
+      </td>`;
+      return `<tr>${cells}${actions}</tr>`;
+    }).join('');
+
+    document.getElementById('cases-empty').classList.toggle('hidden', state.cases.length > 0);
+
+    body.querySelectorAll('button[data-action]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        if (btn.dataset.action === 'edit') openCaseModal(state.cases.find(c => String(c.ID) === String(id)));
+        if (btn.dataset.action === 'delete') confirmDeleteCase(id);
+      });
+    });
+  }
+
+  function renderCell(col, value) {
+    if (value == null || value === '') return '';
+    if (col.type === 'initials') {
+      return `<span class="initials-pill">${escapeHtml(value)}</span>`;
+    }
+    if (col.type === 'link') {
+      const href = String(value);
+      const safe = /^https?:\/\//i.test(href) ? href : 'https://' + href;
+      return `<a href="${escapeAttr(safe)}" target="_blank" rel="noopener">${escapeHtml(value)}</a>`;
+    }
+    if (col.type === 'checkbox') {
+      const truthy = value === true || value === 'true' || value === 'TRUE' || value === 1 || value === '1';
+      return truthy ? '&#9989;' : '';
+    }
+    if (col.type === 'date' && value) {
+      const d = new Date(value);
+      if (!isNaN(d)) return d.toLocaleDateString();
+    }
+    return escapeHtml(String(value));
+  }
+
+  function renderInitialsFilter() {
+    const sel = document.getElementById('filter-initials');
+    const current = sel.value;
+    const opts = state.team.map(t => `<option value="${escapeAttr(t.Initials)}">${escapeHtml(t.Initials)} — ${escapeHtml(t.Name || '')}</option>`).join('');
+    sel.innerHTML = '<option value="">All team members</option>' + opts;
+    if (current) sel.value = current;
+  }
+
+  /* ---------- Filters ---------- */
+  function bindFilters() {
+    document.getElementById('filter').addEventListener('input', e => {
+      state.filterText = e.target.value;
+      renderCases();
+    });
+    document.getElementById('filter-initials').addEventListener('change', e => {
+      state.filterInitials = e.target.value.toUpperCase();
+      renderCases();
+    });
+  }
+
+  /* ---------- Case modal ---------- */
+  function bindCaseModal() {
+    document.getElementById('add-case-btn').addEventListener('click', () => openCaseModal(null));
+    document.getElementById('case-cancel').addEventListener('click', closeCaseModal);
+    document.getElementById('case-form').addEventListener('submit', onCaseSubmit);
+    document.getElementById('case-modal').addEventListener('click', e => {
+      if (e.target.id === 'case-modal') closeCaseModal();
+    });
+  }
+
+  function openCaseModal(existing) {
+    const form = document.getElementById('case-form');
+    form.reset();
+    document.getElementById('case-modal-title').textContent = existing ? 'Edit Case' : 'Add Case';
+    form.elements.ID.value = existing ? existing.ID : '';
+
+    const fields = document.getElementById('case-fields');
+    fields.innerHTML = caseColumns().map(c => fieldHtml(c, existing ? existing[c.key] : '')).join('');
+    document.getElementById('case-modal').classList.remove('hidden');
+  }
+
+  function fieldHtml(col, value) {
+    const v = value == null ? '' : String(value);
+    if (col.type === 'initials') {
+      const opts = state.team.map(t => `<option value="${escapeAttr(t.Initials)}" ${t.Initials === v ? 'selected' : ''}>${escapeHtml(t.Initials)} — ${escapeHtml(t.Name || '')}</option>`).join('');
+      return `<div class="field"><label>${escapeHtml(col.label)}</label>
+        <select name="${escapeAttr(col.key)}" required><option value="">Select...</option>${opts}</select></div>`;
+    }
+    if (col.type === 'dropdown') {
+      const choices = String(col.options || '').split(',').map(s => s.trim()).filter(Boolean);
+      const opts = choices.map(o => `<option value="${escapeAttr(o)}" ${o === v ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('');
+      return `<div class="field"><label>${escapeHtml(col.label)}</label>
+        <select name="${escapeAttr(col.key)}"><option value="">—</option>${opts}</select></div>`;
+    }
+    if (col.type === 'date') {
+      const dv = v ? new Date(v) : null;
+      const iso = dv && !isNaN(dv) ? dv.toISOString().slice(0, 10) : '';
+      return `<div class="field"><label>${escapeHtml(col.label)}</label>
+        <input type="date" name="${escapeAttr(col.key)}" value="${escapeAttr(iso)}"></div>`;
+    }
+    if (col.type === 'number') {
+      return `<div class="field"><label>${escapeHtml(col.label)}</label>
+        <input type="number" step="any" name="${escapeAttr(col.key)}" value="${escapeAttr(v)}"></div>`;
+    }
+    if (col.type === 'checkbox') {
+      const checked = v === 'true' || v === 'TRUE' || v === '1' || v === 'on' || value === true;
+      return `<div class="field"><label>${escapeHtml(col.label)}</label>
+        <input type="checkbox" name="${escapeAttr(col.key)}" ${checked ? 'checked' : ''}></div>`;
+    }
+    if (col.type === 'link' || col.key === 'MainLink') {
+      return `<div class="field"><label>${escapeHtml(col.label)}</label>
+        <input type="url" name="${escapeAttr(col.key)}" value="${escapeAttr(v)}" placeholder="https://..."></div>`;
+    }
+    return `<div class="field"><label>${escapeHtml(col.label)}</label>
+      <input type="text" name="${escapeAttr(col.key)}" value="${escapeAttr(v)}"></div>`;
+  }
+
+  function closeCaseModal() {
+    document.getElementById('case-modal').classList.add('hidden');
+  }
+
+  async function onCaseSubmit(e) {
+    e.preventDefault();
+    const form = e.target;
+    const payload = {};
+    caseColumns().forEach(c => {
+      const el = form.elements[c.key];
+      if (!el) return;
+      if (el.type === 'checkbox') payload[c.key] = el.checked;
+      else payload[c.key] = el.value;
+    });
+    if (form.elements.ID.value) payload.ID = form.elements.ID.value;
+    try {
+      if (payload.ID) {
+        await call('updateCase', payload);
+        toast('Case updated', 'success');
+      } else {
+        await call('addCase', payload);
+        toast('Case added', 'success');
+      }
+      closeCaseModal();
+      state.cases = await call('getCases');
+      renderCases();
+    } catch (err) {
+      toast('Save failed: ' + (err.message || err), 'error');
+    }
+  }
+
+  async function confirmDeleteCase(id) {
+    if (!confirm('Delete this case?')) return;
+    try {
+      await call('deleteCase', id);
+      state.cases = state.cases.filter(c => String(c.ID) !== String(id));
+      renderCases();
+      toast('Deleted', 'success');
+    } catch (err) {
+      toast('Delete failed: ' + (err.message || err), 'error');
+    }
+  }
+
+  /* ---------- Team ---------- */
+  function bindTeamForm() {
+    document.getElementById('team-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const payload = {
+        Initials: fd.get('Initials'),
+        Name: fd.get('Name'),
+        Role: fd.get('Role')
+      };
+      try {
+        await call('saveTeamMember', payload);
+        e.target.reset();
+        state.team = await call('getTeamMembers');
+        renderTeam();
+        renderInitialsFilter();
+        toast('Saved', 'success');
+      } catch (err) {
+        toast('Save failed: ' + (err.message || err), 'error');
+      }
+    });
+  }
+
+  function renderTeam() {
+    const body = document.getElementById('team-body');
+    if (!state.team.length) {
+      body.innerHTML = '<tr><td colspan="4" class="empty">No team members yet.</td></tr>';
+      return;
+    }
+    body.innerHTML = state.team.map(t => `
+      <tr>
+        <td><span class="initials-pill">${escapeHtml(t.Initials)}</span></td>
+        <td>${escapeHtml(t.Name || '')}</td>
+        <td>${escapeHtml(t.Role || '')}</td>
+        <td class="row-actions">
+          <button class="danger" data-initials="${escapeAttr(t.Initials)}">&#10005;</button>
+        </td>
+      </tr>
+    `).join('');
+    body.querySelectorAll('button[data-initials]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Remove ' + btn.dataset.initials + '?')) return;
+        try {
+          await call('deleteTeamMember', btn.dataset.initials);
+          state.team = state.team.filter(t => t.Initials !== btn.dataset.initials);
+          renderTeam();
+          renderInitialsFilter();
+          toast('Removed', 'success');
+        } catch (err) {
+          toast('Delete failed: ' + (err.message || err), 'error');
+        }
+      });
+    });
+  }
+
+  /* ---------- Custom columns ---------- */
+  function renderColumnTypeOptions() {
+    const sel = document.getElementById('column-type');
+    sel.innerHTML = state.columnTypes.map(t => `<option value="${escapeAttr(t)}">${escapeHtml(t)}</option>`).join('');
+    toggleOptionsField();
+  }
+
+  function toggleOptionsField() {
+    const type = document.getElementById('column-type').value;
+    const opts = document.getElementById('column-options');
+    opts.disabled = type !== 'dropdown';
+    if (type !== 'dropdown') opts.value = '';
+  }
+
+  function bindColumnForm() {
+    document.getElementById('column-type').addEventListener('change', toggleOptionsField);
+    document.getElementById('column-cancel').addEventListener('click', resetColumnForm);
+    document.getElementById('column-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const payload = {
+        ColumnId: fd.get('ColumnId') || null,
+        ColumnName: fd.get('ColumnName'),
+        ColumnType: fd.get('ColumnType'),
+        Options: fd.get('Options') || ''
+      };
+      try {
+        await call('saveColumn', payload);
+        resetColumnForm();
+        const data = await call('getDashboardData');
+        applyData(data);
+        toast('Column saved', 'success');
+      } catch (err) {
+        toast('Save failed: ' + (err.message || err), 'error');
+      }
+    });
+  }
+
+  function resetColumnForm() {
+    const f = document.getElementById('column-form');
+    f.reset();
+    f.elements.ColumnId.value = '';
+    document.getElementById('column-cancel').classList.add('hidden');
+    toggleOptionsField();
+  }
+
+  function startEditColumn(col) {
+    const f = document.getElementById('column-form');
+    f.elements.ColumnId.value = col.ColumnId;
+    f.elements.ColumnName.value = col.ColumnName;
+    f.elements.ColumnType.value = String(col.ColumnType || 'text').toLowerCase();
+    f.elements.Options.value = col.Options || '';
+    toggleOptionsField();
+    document.getElementById('column-cancel').classList.remove('hidden');
+    document.querySelector('[name="ColumnName"]').focus();
+  }
+
+  function renderColumns() {
+    const body = document.getElementById('columns-body');
+    if (!state.columns.length) {
+      body.innerHTML = '<tr><td colspan="5" class="empty">No custom columns yet.</td></tr>';
+      return;
+    }
+    body.innerHTML = state.columns.map((c, i) => `
+      <tr>
+        <td>
+          <button class="icon" data-id="${escapeAttr(c.ColumnId)}" data-dir="up" title="Move up" ${i === 0 ? 'disabled' : ''}>&#8593;</button>
+          <button class="icon" data-id="${escapeAttr(c.ColumnId)}" data-dir="down" title="Move down" ${i === state.columns.length - 1 ? 'disabled' : ''}>&#8595;</button>
+        </td>
+        <td>${escapeHtml(c.ColumnName)}</td>
+        <td><span class="muted small">${escapeHtml(c.ColumnType)}</span></td>
+        <td><span class="muted small">${escapeHtml(c.Options || '')}</span></td>
+        <td class="row-actions">
+          <button class="icon" data-edit="${escapeAttr(c.ColumnId)}" title="Edit">&#9998;</button>
+          <button class="danger" data-delete="${escapeAttr(c.ColumnId)}" title="Delete">&#10005;</button>
+        </td>
+      </tr>
+    `).join('');
+
+    body.querySelectorAll('button[data-edit]').forEach(b => {
+      b.addEventListener('click', () => startEditColumn(state.columns.find(x => x.ColumnId === b.dataset.edit)));
+    });
+    body.querySelectorAll('button[data-delete]').forEach(b => {
+      b.addEventListener('click', async () => {
+        if (!confirm('Delete this column? Existing data in this column will be removed.')) return;
+        try {
+          await call('deleteColumn', b.dataset.delete);
+          const data = await call('getDashboardData');
+          applyData(data);
+          toast('Column deleted', 'success');
+        } catch (err) {
+          toast('Delete failed: ' + (err.message || err), 'error');
+        }
+      });
+    });
+    body.querySelectorAll('button[data-dir]').forEach(b => {
+      b.addEventListener('click', () => moveColumn(b.dataset.id, b.dataset.dir));
+    });
+  }
+
+  async function moveColumn(id, dir) {
+    const idx = state.columns.findIndex(c => c.ColumnId === id);
+    if (idx === -1) return;
+    const swap = dir === 'up' ? idx - 1 : idx + 1;
+    if (swap < 0 || swap >= state.columns.length) return;
+    const arr = state.columns.slice();
+    [arr[idx], arr[swap]] = [arr[swap], arr[idx]];
+    try {
+      await call('reorderColumns', arr.map(c => c.ColumnId));
+      const data = await call('getDashboardData');
+      applyData(data);
+    } catch (err) {
+      toast('Reorder failed: ' + (err.message || err), 'error');
+    }
+  }
+
+  /* ---------- Helpers ---------- */
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function escapeAttr(s) { return escapeHtml(s); }
+
+  let toastTimer = null;
+  function toast(msg, kind) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = 'toast' + (kind ? ' ' + kind : '');
+    el.classList.remove('hidden');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.add('hidden'), 2800);
+  }
+
+  let loaderCount = 0;
+  function showLoader(on) {
+    loaderCount += on ? 1 : -1;
+    if (loaderCount < 0) loaderCount = 0;
+    document.getElementById('loader').classList.toggle('hidden', loaderCount === 0);
+  }
+</script>

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <?!= include('Stylesheet'); ?>
+</head>
+<body>
+  <header class="topbar">
+    <h1>Case Dashboard</h1>
+    <nav class="tabs">
+      <button class="tab active" data-tab="cases">Cases</button>
+      <button class="tab" data-tab="settings">Settings</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- ==================== CASES TAB ==================== -->
+    <section id="cases" class="panel active">
+      <div class="toolbar">
+        <input type="text" id="filter" placeholder="Filter cases...">
+        <select id="filter-initials">
+          <option value="">All team members</option>
+        </select>
+        <button id="add-case-btn" class="primary">+ Add Case</button>
+      </div>
+
+      <div class="table-wrap">
+        <table id="cases-table">
+          <thead><tr id="cases-head"></tr></thead>
+          <tbody id="cases-body"></tbody>
+        </table>
+      </div>
+      <p id="cases-empty" class="empty hidden">No cases yet. Click "+ Add Case" to create one.</p>
+    </section>
+
+    <!-- ==================== SETTINGS TAB ==================== -->
+    <section id="settings" class="panel">
+      <div class="settings-grid">
+        <div class="card">
+          <h2>Team Members</h2>
+          <form id="team-form" class="inline-form">
+            <input type="text" name="Initials" placeholder="Initials" required maxlength="6" autocomplete="off">
+            <input type="text" name="Name" placeholder="Full name" required autocomplete="off">
+            <input type="text" name="Role" placeholder="Role" autocomplete="off">
+            <button type="submit" class="primary">Save</button>
+          </form>
+          <table class="settings-table">
+            <thead><tr><th>Initials</th><th>Name</th><th>Role</th><th></th></tr></thead>
+            <tbody id="team-body"></tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h2>Custom Columns</h2>
+          <p class="muted small">"Initials" and "Main Link" are built in. Add your own columns below.</p>
+          <form id="column-form" class="inline-form">
+            <input type="hidden" name="ColumnId" value="">
+            <input type="text" name="ColumnName" placeholder="Column name" required autocomplete="off">
+            <select name="ColumnType" id="column-type"></select>
+            <input type="text" name="Options" id="column-options" placeholder="Options (comma-separated)" autocomplete="off" disabled>
+            <button type="submit" class="primary">Save</button>
+            <button type="button" id="column-cancel" class="ghost hidden">Cancel</button>
+          </form>
+          <table class="settings-table">
+            <thead><tr><th>Order</th><th>Name</th><th>Type</th><th>Options</th><th></th></tr></thead>
+            <tbody id="columns-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ==================== Case modal ==================== -->
+  <div id="case-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content">
+      <h2 id="case-modal-title">Add Case</h2>
+      <form id="case-form">
+        <input type="hidden" name="ID" value="">
+        <div id="case-fields"></div>
+        <div class="modal-actions">
+          <button type="button" id="case-cancel" class="ghost">Cancel</button>
+          <button type="submit" class="primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <div id="loader" class="loader hidden"><div class="spinner"></div></div>
+
+  <?!= include('JavaScript'); ?>
+</body>
+</html>
