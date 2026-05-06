@@ -136,6 +136,7 @@
     width: 100%; padding: 8px 10px; border: 1px solid var(--border);
     border-radius: 6px; font: inherit; background: var(--surface);
   }
+  .field textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; resize: vertical; }
 
   .toast {
     position: fixed; bottom: 20px; right: 20px; padding: 10px 16px;
@@ -210,7 +211,7 @@
 
         <div class="card">
           <h2>Custom Columns</h2>
-          <p class="muted small">"Member" and "Main Link" are built in. Add your own columns below.</p>
+          <p class="muted small">"Member" and "Main Link" are built in. Add your own columns below or bulk-import from a Google Sheet.</p>
           <form id="column-form" class="inline-form">
             <input type="hidden" name="ColumnId" value="">
             <input type="text" name="ColumnName" placeholder="Column name" required autocomplete="off">
@@ -219,6 +220,9 @@
             <button type="submit" class="primary">Save</button>
             <button type="button" id="column-cancel" class="ghost hidden">Cancel</button>
           </form>
+          <div style="margin-bottom:12px">
+            <button type="button" id="bulk-import-btn" class="ghost">+ Bulk import from Sheet/CSV...</button>
+          </div>
           <table class="settings-table">
             <thead><tr><th>Order</th><th>Name</th><th>Type</th><th>Options</th><th></th></tr></thead>
             <tbody id="columns-body"></tbody>
@@ -239,6 +243,56 @@
           <button type="submit" class="primary">Save</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <div id="import-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content" style="max-width:640px">
+      <h2>Bulk import columns</h2>
+      <p class="muted small">Paste a Google Sheet URL <em>or</em> CSV text. Expected columns: <code>Column Name</code>, <code>Type</code>, <code>Options</code>. Type defaults to <code>text</code>. Allowed types: text, number, date, link, dropdown, checkbox.</p>
+
+      <div class="tabs" id="import-source-tabs" style="margin-bottom:12px">
+        <button type="button" class="tab active" data-source="url">Google Sheet URL</button>
+        <button type="button" class="tab" data-source="csv">Paste CSV</button>
+      </div>
+
+      <div id="import-url-pane">
+        <div class="field">
+          <label>Sheet URL</label>
+          <input type="url" id="import-url" placeholder="https://docs.google.com/spreadsheets/d/...">
+        </div>
+        <div class="field">
+          <label>Tab name (optional)</label>
+          <input type="text" id="import-tab" placeholder="Leave blank for the first tab">
+        </div>
+        <p class="muted small">In preview mode the sheet must be shared "Anyone with the link can view". In the deployed app, any sheet you have access to works.</p>
+      </div>
+
+      <div id="import-csv-pane" class="hidden">
+        <div class="field">
+          <label>CSV text</label>
+          <textarea id="import-csv" rows="7" placeholder="Column Name,Type,Options&#10;Status,dropdown,&quot;Open, In Review, Closed&quot;&#10;Priority,dropdown,&quot;Low, Medium, High&quot;&#10;Due Date,date,&#10;Notes,text,"></textarea>
+        </div>
+      </div>
+
+      <div style="text-align:right;margin:8px 0">
+        <button type="button" id="import-preview-btn" class="ghost">Preview</button>
+      </div>
+
+      <div id="import-preview" class="hidden">
+        <h3 style="font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin:8px 0 4px">Preview</h3>
+        <div class="table-wrap" style="max-height:280px">
+          <table class="settings-table">
+            <thead><tr><th>Column Name</th><th>Type</th><th>Options</th><th>Status</th></tr></thead>
+            <tbody id="import-preview-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" id="import-cancel" class="ghost">Cancel</button>
+        <button type="button" id="import-confirm" class="primary" disabled>Import</button>
+      </div>
     </div>
   </div>
 
@@ -426,7 +480,119 @@
       });
       save(db);
       return { ok: true };
+    },
+
+    /* ---------- Bulk column import (preview/mock) ---------- */
+    previewColumnsFromText(text) {
+      const rows = parseDelimitedText(text);
+      return parseColumnRows(rows);
+    },
+    importColumnsFromText(text) {
+      return applyColumnImport(handlers.previewColumnsFromText(text).items);
+    },
+    previewColumnsFromSheet(url, tabName) {
+      // Synchronous shim: fetch is async, so we throw a friendly error here
+      // and let the UI fall back. (See window.previewColumnsFromSheetAsync.)
+      throw new Error('Use the async helper in preview mode (handled by the UI).');
+    },
+    importColumnsFromSheet(url, tabName) {
+      throw new Error('Use the async helper in preview mode (handled by the UI).');
     }
+  };
+
+  function parseDelimitedText(text) {
+    const raw = String(text || '').replace(/\r/g, '');
+    if (!raw.trim()) return [];
+    const delim = raw.indexOf('\t') !== -1 ? '\t' : ',';
+    const out = [];
+    let cur = '', row = [], inQuote = false;
+    for (let i = 0; i < raw.length; i++) {
+      const c = raw[i];
+      if (inQuote) {
+        if (c === '"') { if (raw[i + 1] === '"') { cur += '"'; i++; } else inQuote = false; }
+        else cur += c;
+      } else {
+        if (c === '"') inQuote = true;
+        else if (c === delim) { row.push(cur); cur = ''; }
+        else if (c === '\n') { row.push(cur); out.push(row); row = []; cur = ''; }
+        else cur += c;
+      }
+    }
+    if (cur.length || row.length) { row.push(cur); out.push(row); }
+    return out.filter(r => r.some(c => String(c).trim() !== ''));
+  }
+
+  function parseColumnRows(rows) {
+    if (!rows || !rows.length) return { items: [], hadHeaders: false };
+    const firstRow = rows[0].map(c => String(c == null ? '' : c).toLowerCase().trim());
+    const looksLikeHeader = firstRow.some(c =>
+      c.includes('name') || c.includes('type') || c.includes('option') || c === 'column'
+    );
+    let dataRows, idxName, idxType, idxOptions;
+    if (looksLikeHeader) {
+      idxName = firstRow.findIndex(c => c.includes('name') || c === 'column');
+      if (idxName === -1) idxName = 0;
+      idxType = firstRow.findIndex(c => c.includes('type'));
+      idxOptions = firstRow.findIndex(c => c.includes('option'));
+      dataRows = rows.slice(1);
+    } else {
+      idxName = 0;
+      idxType = rows[0].length > 1 ? 1 : -1;
+      idxOptions = rows[0].length > 2 ? 2 : -1;
+      dataRows = rows;
+    }
+    const items = [];
+    dataRows.forEach(r => {
+      const name = String(r[idxName] == null ? '' : r[idxName]).trim();
+      if (!name) return;
+      const rawType = idxType >= 0 ? String(r[idxType] == null ? '' : r[idxType]).toLowerCase().trim() : '';
+      const type = rawType || 'text';
+      const opts = idxOptions >= 0 ? String(r[idxOptions] == null ? '' : r[idxOptions]).trim() : '';
+      let valid = true, error = '';
+      if (FIXED_CASE_KEYS.indexOf(name) !== -1) { valid = false; error = 'Reserved column name'; }
+      else if (COLUMN_TYPES.indexOf(type) === -1) { valid = false; error = 'Invalid type "' + type + '"'; }
+      items.push({ ColumnName: name, ColumnType: type, Options: opts, valid: valid, error: error });
+    });
+    return { items: items, hadHeaders: looksLikeHeader };
+  }
+
+  function applyColumnImport(items) {
+    const db = load();
+    const existingNames = {};
+    db.columns.forEach(c => { existingNames[String(c.ColumnName).toLowerCase()] = true; });
+    const result = { added: 0, skipped: 0, errors: [] };
+    let order = db.columns.length;
+    (items || []).forEach(it => {
+      if (!it.valid) { result.errors.push((it.ColumnName || '(blank)') + ': ' + it.error); return; }
+      if (existingNames[String(it.ColumnName).toLowerCase()]) { result.skipped++; return; }
+      db.columns.push({ ColumnId: uuid(), ColumnName: it.ColumnName, ColumnType: it.ColumnType, Options: it.Options, Order: order++ });
+      existingNames[String(it.ColumnName).toLowerCase()] = true;
+      result.added++;
+    });
+    save(db);
+    return result;
+  }
+
+  /**
+   * Async URL helper for preview-mode only. Tries to fetch the public CSV
+   * export of a Google Sheet. Requires the sheet to be shared with
+   * "Anyone with the link can view".
+   */
+  window.__previewFetchSheetCsv = async function (url, tabName) {
+    const m = String(url || '').match(/\/d\/([a-zA-Z0-9-_]+)/);
+    if (!m) throw new Error('That doesn\'t look like a Google Sheet URL.');
+    const id = m[1];
+    const gidMatch = String(url || '').match(/[?#&]gid=(\d+)/);
+    let exportUrl = `https://docs.google.com/spreadsheets/d/${id}/export?format=csv`;
+    if (tabName) exportUrl += `&sheet=${encodeURIComponent(tabName)}`;
+    else if (gidMatch) exportUrl += `&gid=${gidMatch[1]}`;
+    let resp;
+    try { resp = await fetch(exportUrl); }
+    catch (e) {
+      throw new Error('Could not fetch the sheet (browser blocked it). Make sure the sheet is shared "Anyone with the link can view", or use the Paste CSV tab.');
+    }
+    if (!resp.ok) throw new Error('Sheet fetch failed (HTTP ' + resp.status + '). Check sharing settings.');
+    return await resp.text();
   };
 
   function makeRunner() {
@@ -496,6 +662,7 @@
     bindCaseModal();
     bindTeamForm();
     bindColumnForm();
+    bindImportModal();
     bindFilters();
     try {
       const data = await call('getDashboardData');
@@ -986,6 +1153,111 @@
       applyData(data);
     } catch (err) {
       toast('Reorder failed: ' + (err.message || err), 'error');
+    }
+  }
+
+  /* ---------- Bulk column import ---------- */
+  let importSource = 'url';
+  let importParsedItems = [];
+
+  function bindImportModal() {
+    const modal = document.getElementById('import-modal');
+    document.getElementById('bulk-import-btn').addEventListener('click', () => {
+      document.getElementById('import-url').value = '';
+      document.getElementById('import-tab').value = '';
+      document.getElementById('import-csv').value = '';
+      document.getElementById('import-preview').classList.add('hidden');
+      document.getElementById('import-preview-body').innerHTML = '';
+      document.getElementById('import-confirm').disabled = true;
+      document.getElementById('import-confirm').textContent = 'Import';
+      importParsedItems = [];
+      setImportSource('url');
+      modal.classList.remove('hidden');
+    });
+    document.getElementById('import-cancel').addEventListener('click', () => modal.classList.add('hidden'));
+    modal.addEventListener('click', e => { if (e.target.id === 'import-modal') modal.classList.add('hidden'); });
+    document.querySelectorAll('#import-source-tabs .tab').forEach(t => {
+      t.addEventListener('click', () => setImportSource(t.dataset.source));
+    });
+    document.getElementById('import-preview-btn').addEventListener('click', onImportPreview);
+    document.getElementById('import-confirm').addEventListener('click', onImportConfirm);
+  }
+
+  function setImportSource(s) {
+    importSource = s;
+    document.querySelectorAll('#import-source-tabs .tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.source === s);
+    });
+    document.getElementById('import-url-pane').classList.toggle('hidden', s !== 'url');
+    document.getElementById('import-csv-pane').classList.toggle('hidden', s !== 'csv');
+    document.getElementById('import-preview').classList.add('hidden');
+    document.getElementById('import-confirm').disabled = true;
+  }
+
+  async function onImportPreview() {
+    try {
+      let result;
+      if (importSource === 'url') {
+        const url = document.getElementById('import-url').value.trim();
+        const tab = document.getElementById('import-tab').value.trim();
+        if (!url) { toast('Enter a Google Sheet URL', 'error'); return; }
+        const csv = await window.__previewFetchSheetCsv(url, tab);
+        result = await call('previewColumnsFromText', csv);
+      } else {
+        const csv = document.getElementById('import-csv').value;
+        if (!csv.trim()) { toast('Paste some CSV first', 'error'); return; }
+        result = await call('previewColumnsFromText', csv);
+      }
+      renderImportPreview(result);
+    } catch (err) {
+      toast('Preview failed: ' + (err.message || err), 'error');
+    }
+  }
+
+  function renderImportPreview(result) {
+    importParsedItems = (result && result.items) || [];
+    const body = document.getElementById('import-preview-body');
+    if (!importParsedItems.length) {
+      body.innerHTML = '<tr><td colspan="4" class="empty">No rows found.</td></tr>';
+    } else {
+      body.innerHTML = importParsedItems.map(it => `
+        <tr>
+          <td>${escapeHtml(it.ColumnName)}</td>
+          <td><span class="muted small">${escapeHtml(it.ColumnType)}</span></td>
+          <td><span class="muted small">${escapeHtml(it.Options || '')}</span></td>
+          <td>${it.valid
+            ? '<span class="muted small">OK</span>'
+            : `<span class="initials-pill missing" title="${escapeAttr(it.error || '')}">error</span>`}</td>
+        </tr>
+      `).join('');
+    }
+    document.getElementById('import-preview').classList.remove('hidden');
+    const validCount = importParsedItems.filter(i => i.valid).length;
+    const btn = document.getElementById('import-confirm');
+    btn.disabled = validCount === 0;
+    btn.textContent = validCount > 0 ? `Import ${validCount} column${validCount === 1 ? '' : 's'}` : 'Import';
+  }
+
+  async function onImportConfirm() {
+    try {
+      let result;
+      if (importSource === 'url') {
+        const url = document.getElementById('import-url').value.trim();
+        const tab = document.getElementById('import-tab').value.trim();
+        const csv = await window.__previewFetchSheetCsv(url, tab);
+        result = await call('importColumnsFromText', csv);
+      } else {
+        const csv = document.getElementById('import-csv').value;
+        result = await call('importColumnsFromText', csv);
+      }
+      document.getElementById('import-modal').classList.add('hidden');
+      const data = await call('getDashboardData');
+      applyData(data);
+      const errs = (result.errors || []).length;
+      const msg = `Added ${result.added}, skipped ${result.skipped}` + (errs ? `, ${errs} error(s)` : '');
+      toast(msg, result.added > 0 ? 'success' : 'error');
+    } catch (err) {
+      toast('Import failed: ' + (err.message || err), 'error');
     }
   }
 

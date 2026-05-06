@@ -31,6 +31,7 @@
     bindCaseModal();
     bindTeamForm();
     bindColumnForm();
+    bindImportModal();
     bindFilters();
     try {
       const data = await call('getDashboardData');
@@ -528,6 +529,109 @@
       applyData(data);
     } catch (err) {
       toast('Reorder failed: ' + (err.message || err), 'error');
+    }
+  }
+
+  /* ---------- Bulk column import ---------- */
+  let importSource = 'url';
+  let importParsedItems = [];
+
+  function bindImportModal() {
+    const modal = document.getElementById('import-modal');
+    document.getElementById('bulk-import-btn').addEventListener('click', () => {
+      document.getElementById('import-url').value = '';
+      document.getElementById('import-tab').value = '';
+      document.getElementById('import-csv').value = '';
+      document.getElementById('import-preview').classList.add('hidden');
+      document.getElementById('import-preview-body').innerHTML = '';
+      document.getElementById('import-confirm').disabled = true;
+      document.getElementById('import-confirm').textContent = 'Import';
+      importParsedItems = [];
+      setImportSource('url');
+      modal.classList.remove('hidden');
+    });
+    document.getElementById('import-cancel').addEventListener('click', () => modal.classList.add('hidden'));
+    modal.addEventListener('click', e => { if (e.target.id === 'import-modal') modal.classList.add('hidden'); });
+    document.querySelectorAll('#import-source-tabs .tab').forEach(t => {
+      t.addEventListener('click', () => setImportSource(t.dataset.source));
+    });
+    document.getElementById('import-preview-btn').addEventListener('click', onImportPreview);
+    document.getElementById('import-confirm').addEventListener('click', onImportConfirm);
+  }
+
+  function setImportSource(s) {
+    importSource = s;
+    document.querySelectorAll('#import-source-tabs .tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.source === s);
+    });
+    document.getElementById('import-url-pane').classList.toggle('hidden', s !== 'url');
+    document.getElementById('import-csv-pane').classList.toggle('hidden', s !== 'csv');
+    document.getElementById('import-preview').classList.add('hidden');
+    document.getElementById('import-confirm').disabled = true;
+  }
+
+  async function onImportPreview() {
+    try {
+      let result;
+      if (importSource === 'url') {
+        const url = document.getElementById('import-url').value.trim();
+        const tab = document.getElementById('import-tab').value.trim();
+        if (!url) { toast('Enter a Google Sheet URL', 'error'); return; }
+        result = await call('previewColumnsFromSheet', url, tab);
+      } else {
+        const csv = document.getElementById('import-csv').value;
+        if (!csv.trim()) { toast('Paste some CSV first', 'error'); return; }
+        result = await call('previewColumnsFromText', csv);
+      }
+      renderImportPreview(result);
+    } catch (err) {
+      toast('Preview failed: ' + (err.message || err), 'error');
+    }
+  }
+
+  function renderImportPreview(result) {
+    importParsedItems = (result && result.items) || [];
+    const body = document.getElementById('import-preview-body');
+    if (!importParsedItems.length) {
+      body.innerHTML = '<tr><td colspan="4" class="empty">No rows found.</td></tr>';
+    } else {
+      body.innerHTML = importParsedItems.map(it => `
+        <tr>
+          <td>${escapeHtml(it.ColumnName)}</td>
+          <td><span class="muted small">${escapeHtml(it.ColumnType)}</span></td>
+          <td><span class="muted small">${escapeHtml(it.Options || '')}</span></td>
+          <td>${it.valid
+            ? '<span class="muted small">OK</span>'
+            : `<span class="initials-pill missing" title="${escapeAttr(it.error || '')}">error</span>`}</td>
+        </tr>
+      `).join('');
+    }
+    document.getElementById('import-preview').classList.remove('hidden');
+    const validCount = importParsedItems.filter(i => i.valid).length;
+    const btn = document.getElementById('import-confirm');
+    btn.disabled = validCount === 0;
+    btn.textContent = validCount > 0 ? `Import ${validCount} column${validCount === 1 ? '' : 's'}` : 'Import';
+  }
+
+  async function onImportConfirm() {
+    try {
+      let result;
+      if (importSource === 'url') {
+        const url = document.getElementById('import-url').value.trim();
+        const tab = document.getElementById('import-tab').value.trim();
+        result = await call('importColumnsFromSheet', url, tab);
+      } else {
+        const csv = document.getElementById('import-csv').value;
+        result = await call('importColumnsFromText', csv);
+      }
+      document.getElementById('import-modal').classList.add('hidden');
+      const data = await call('getDashboardData');
+      applyData(data);
+      const errs = (result.errors || []).length;
+      const msg = `Added ${result.added}, skipped ${result.skipped}` + (errs ? `, ${errs} error(s)` : '');
+      toast(msg, result.added > 0 ? 'success' : 'error');
+    } catch (err) {
+      toast('Import failed: ' + (err.message || err), 'error');
     }
   }
 

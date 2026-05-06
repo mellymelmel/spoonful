@@ -470,3 +470,154 @@ function removeCasesColumn_(name) {
   const idx = headers.indexOf(name);
   if (idx !== -1) sheet.deleteColumn(idx + 1);
 }
+
+/* ---------- Bulk column import ----------
+ * Accepts either a Google Sheets URL (+ optional tab) or pasted CSV/TSV.
+ * Source rows are expected to have headers: "Column Name", "Type", "Options".
+ * Header matching is loose (case-insensitive substring). If no headers are
+ * detected the first column is treated as the name and type defaults to text.
+ */
+
+function previewColumnsFromSheet(url, tabName) {
+  const rows = readRowsFromSourceSheet_(url, tabName);
+  return parseColumnRows_(rows);
+}
+
+function importColumnsFromSheet(url, tabName) {
+  const parsed = previewColumnsFromSheet(url, tabName);
+  return applyColumnImport_(parsed.items);
+}
+
+function previewColumnsFromText(text) {
+  const rows = parseDelimitedText_(text);
+  return parseColumnRows_(rows);
+}
+
+function importColumnsFromText(text) {
+  const parsed = previewColumnsFromText(text);
+  return applyColumnImport_(parsed.items);
+}
+
+function readRowsFromSourceSheet_(url, tabName) {
+  if (!url) throw new Error('Sheet URL is required');
+  let ss;
+  try {
+    ss = SpreadsheetApp.openByUrl(String(url));
+  } catch (e) {
+    const id = extractSheetId_(url);
+    try { ss = SpreadsheetApp.openById(id); }
+    catch (ee) { throw new Error('Could not open spreadsheet. Check the URL and that you have view access.'); }
+  }
+  let sheet;
+  if (tabName && String(tabName).trim()) {
+    sheet = ss.getSheetByName(String(tabName).trim());
+    if (!sheet) throw new Error('Tab not found: ' + tabName);
+  } else {
+    sheet = ss.getSheets()[0];
+  }
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  if (lastRow < 1 || lastCol < 1) return [];
+  return sheet.getRange(1, 1, lastRow, lastCol).getValues();
+}
+
+function extractSheetId_(url) {
+  const m = String(url || '').match(/\/d\/([a-zA-Z0-9-_]+)/);
+  return m ? m[1] : String(url || '').trim();
+}
+
+function parseDelimitedText_(text) {
+  const raw = String(text || '').replace(/\r/g, '');
+  if (!raw.trim()) return [];
+  // Detect delimiter: tab if any tabs exist, else comma.
+  const delim = raw.indexOf('\t') !== -1 ? '\t' : ',';
+  const out = [];
+  let cur = '';
+  let row = [];
+  let inQuote = false;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (inQuote) {
+      if (c === '"') {
+        if (raw[i + 1] === '"') { cur += '"'; i++; }
+        else inQuote = false;
+      } else cur += c;
+    } else {
+      if (c === '"') inQuote = true;
+      else if (c === delim) { row.push(cur); cur = ''; }
+      else if (c === '\n') { row.push(cur); out.push(row); row = []; cur = ''; }
+      else cur += c;
+    }
+  }
+  if (cur.length || row.length) { row.push(cur); out.push(row); }
+  return out.filter(r => r.some(c => String(c).trim() !== ''));
+}
+
+function parseColumnRows_(rows) {
+  if (!rows || rows.length === 0) return { items: [], hadHeaders: false };
+  const firstRow = rows[0].map(c => String(c == null ? '' : c).toLowerCase().trim());
+  const looksLikeHeader = firstRow.some(c =>
+    c.includes('name') || c.includes('type') || c.includes('option') || c === 'column'
+  );
+  let dataRows, idxName, idxType, idxOptions;
+  if (looksLikeHeader) {
+    idxName = firstRow.findIndex(c => c.includes('name') || c === 'column');
+    if (idxName === -1) idxName = 0;
+    idxType = firstRow.findIndex(c => c.includes('type'));
+    idxOptions = firstRow.findIndex(c => c.includes('option'));
+    dataRows = rows.slice(1);
+  } else {
+    idxName = 0;
+    idxType = rows[0].length > 1 ? 1 : -1;
+    idxOptions = rows[0].length > 2 ? 2 : -1;
+    dataRows = rows;
+  }
+
+  const items = [];
+  dataRows.forEach(r => {
+    const name = String(r[idxName] == null ? '' : r[idxName]).trim();
+    if (!name) return;
+    const rawType = idxType >= 0 ? String(r[idxType] == null ? '' : r[idxType]).toLowerCase().trim() : '';
+    const type = rawType || 'text';
+    const opts = idxOptions >= 0 ? String(r[idxOptions] == null ? '' : r[idxOptions]).trim() : '';
+    let valid = true;
+    let error = '';
+    if (CASES_FIXED_HEADERS.indexOf(name) !== -1) {
+      valid = false;
+      error = 'Reserved column name';
+    } else if (COLUMN_TYPES.indexOf(type) === -1) {
+      valid = false;
+      error = 'Invalid type "' + type + '" (allowed: ' + COLUMN_TYPES.join(', ') + ')';
+    }
+    items.push({ ColumnName: name, ColumnType: type, Options: opts, valid: valid, error: error });
+  });
+  return { items: items, hadHeaders: looksLikeHeader };
+}
+
+function applyColumnImport_(items) {
+  ensureSchema_();
+  const existing = getCustomColumns_();
+  const existingNames = {};
+  existing.forEach(c => { existingNames[String(c.ColumnName).toLowerCase()] = true; });
+  const result = { added: 0, skipped: 0, errors: [] };
+  let order = existing.length;
+  (items || []).forEach(item => {
+    if (!item.valid) {
+      result.errors.push((item.ColumnName || '(blank)') + ': ' + item.error);
+      return;
+    }
+    if (existingNames[String(item.ColumnName).toLowerCase()]) {
+      result.skipped++;
+      return;
+    }
+    saveColumn({
+      ColumnName: item.ColumnName,
+      ColumnType: item.ColumnType,
+      Options: item.Options,
+      Order: order++
+    });
+    existingNames[String(item.ColumnName).toLowerCase()] = true;
+    result.added++;
+  });
+  return result;
+}

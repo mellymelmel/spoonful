@@ -55,7 +55,7 @@
 
         <div class="card">
           <h2>Custom Columns</h2>
-          <p class="muted small">"Initials" and "Main Link" are built in. Add your own columns below.</p>
+          <p class="muted small">"Member" and "Main Link" are built in. Add your own columns below or bulk-import from a Google Sheet.</p>
           <form id="column-form" class="inline-form">
             <input type="hidden" name="ColumnId" value="">
             <input type="text" name="ColumnName" placeholder="Column name" required autocomplete="off">
@@ -64,6 +64,9 @@
             <button type="submit" class="primary">Save</button>
             <button type="button" id="column-cancel" class="ghost hidden">Cancel</button>
           </form>
+          <div style="margin-bottom:12px">
+            <button type="button" id="bulk-import-btn" class="ghost">+ Bulk import from Sheet/CSV...</button>
+          </div>
           <table class="settings-table">
             <thead><tr><th>Order</th><th>Name</th><th>Type</th><th>Options</th><th></th></tr></thead>
             <tbody id="columns-body"></tbody>
@@ -85,6 +88,56 @@
           <button type="submit" class="primary">Save</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- ==================== Bulk-import modal ==================== -->
+  <div id="import-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content" style="max-width:640px">
+      <h2>Bulk import columns</h2>
+      <p class="muted small">Paste a Google Sheet URL <em>or</em> CSV text. Expected columns: <code>Column Name</code>, <code>Type</code>, <code>Options</code>. Type defaults to <code>text</code> if blank. Allowed types: text, number, date, link, dropdown, checkbox.</p>
+
+      <div class="tabs" id="import-source-tabs" style="margin-bottom:12px">
+        <button type="button" class="tab active" data-source="url">Google Sheet URL</button>
+        <button type="button" class="tab" data-source="csv">Paste CSV</button>
+      </div>
+
+      <div id="import-url-pane">
+        <div class="field">
+          <label>Sheet URL</label>
+          <input type="url" id="import-url" placeholder="https://docs.google.com/spreadsheets/d/...">
+        </div>
+        <div class="field">
+          <label>Tab name (optional)</label>
+          <input type="text" id="import-tab" placeholder="Leave blank for the first tab">
+        </div>
+      </div>
+
+      <div id="import-csv-pane" class="hidden">
+        <div class="field">
+          <label>CSV text</label>
+          <textarea id="import-csv" rows="7" placeholder="Column Name,Type,Options&#10;Status,dropdown,&quot;Open, In Review, Closed&quot;&#10;Priority,dropdown,&quot;Low, Medium, High&quot;&#10;Due Date,date,&#10;Notes,text,"></textarea>
+        </div>
+      </div>
+
+      <div style="text-align:right;margin:8px 0">
+        <button type="button" id="import-preview-btn" class="ghost">Preview</button>
+      </div>
+
+      <div id="import-preview" class="hidden">
+        <h3 style="font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin:8px 0 4px">Preview</h3>
+        <div class="table-wrap" style="max-height:280px">
+          <table class="settings-table">
+            <thead><tr><th>Column Name</th><th>Type</th><th>Options</th><th>Status</th></tr></thead>
+            <tbody id="import-preview-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" id="import-cancel" class="ghost">Cancel</button>
+        <button type="button" id="import-confirm" class="primary" disabled>Import</button>
+      </div>
     </div>
   </div>
 
