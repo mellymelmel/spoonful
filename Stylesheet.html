@@ -96,6 +96,11 @@
   }
   .inline-form input[disabled] { background: #f3f4f6; color: var(--muted); }
   .settings-table th { font-size: 11px; }
+  .settings-table td input[type="text"] {
+    width: 100%; padding: 6px 8px; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--surface); font: inherit;
+  }
+  .settings-table tr[data-editing="true"] { background: #fff8c5; }
   .muted { color: var(--muted); }
   .small { font-size: 12px; }
   .hidden { display: none !important; }

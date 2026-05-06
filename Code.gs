@@ -221,6 +221,67 @@ function saveTeamMember(payload) {
   return { ok: true, created: true };
 }
 
+/**
+ * Update an existing team member identified by OriginalInitials.
+ * If the initials change, the row is renamed and any cases that reference
+ * the old initials are updated to the new ones to preserve linkage.
+ */
+function updateTeamMember(payload) {
+  ensureSchema_();
+  if (!payload || !payload.OriginalInitials) {
+    throw new Error('updateTeamMember requires OriginalInitials');
+  }
+  if (!payload.Initials) throw new Error('Initials are required');
+
+  const original = String(payload.OriginalInitials).trim().toUpperCase();
+  const newInitials = String(payload.Initials).trim().toUpperCase();
+  const name = String(payload.Name || '').trim();
+  const role = String(payload.Role || '').trim();
+  if (!newInitials) throw new Error('Initials cannot be empty');
+
+  const ss = getSpreadsheet_();
+  const sheet = ss.getSheetByName(TEAM_SHEET);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) throw new Error('No team members to update');
+
+  const values = sheet.getRange(2, 1, lastRow - 1, TEAM_HEADERS.length).getValues();
+
+  if (original !== newInitials) {
+    const conflict = values.some(r => String(r[0]).trim().toUpperCase() === newInitials);
+    if (conflict) throw new Error('A team member with initials "' + newInitials + '" already exists');
+  }
+
+  for (let i = 0; i < values.length; i++) {
+    if (String(values[i][0]).trim().toUpperCase() === original) {
+      sheet.getRange(i + 2, 1, 1, TEAM_HEADERS.length).setValues([[newInitials, name, role]]);
+      if (original !== newInitials) updateCasesInitials_(original, newInitials);
+      return { ok: true };
+    }
+  }
+  throw new Error('Team member not found: ' + original);
+}
+
+function updateCasesInitials_(oldInitials, newInitials) {
+  const ss = getSpreadsheet_();
+  const sheet = ss.getSheetByName(CASES_SHEET);
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return;
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const idx = headers.indexOf('Initials');
+  if (idx === -1) return;
+  const range = sheet.getRange(2, idx + 1, lastRow - 1, 1);
+  const cells = range.getValues();
+  let changed = false;
+  for (let i = 0; i < cells.length; i++) {
+    if (String(cells[i][0]).trim().toUpperCase() === oldInitials) {
+      cells[i][0] = newInitials;
+      changed = true;
+    }
+  }
+  if (changed) range.setValues(cells);
+}
+
 function deleteTeamMember(initials) {
   if (!initials) throw new Error('initials required');
   const target = String(initials).trim().toUpperCase();

@@ -279,30 +279,118 @@
       body.innerHTML = '<tr><td colspan="4" class="empty">No team members yet.</td></tr>';
       return;
     }
-    body.innerHTML = state.team.map(t => `
-      <tr>
+    body.innerHTML = state.team.map(t => teamRowHtml(t, false)).join('');
+    bindTeamRowEvents();
+  }
+
+  function teamRowHtml(t, editing) {
+    const key = escapeAttr(t.Initials);
+    if (editing) {
+      return `
+        <tr data-key="${key}" data-editing="true">
+          <td><input type="text" data-field="Initials" value="${escapeAttr(t.Initials)}" maxlength="6" required style="width:80px"></td>
+          <td><input type="text" data-field="Name" value="${escapeAttr(t.Name || '')}" required></td>
+          <td><input type="text" data-field="Role" value="${escapeAttr(t.Role || '')}"></td>
+          <td class="row-actions">
+            <button class="primary" data-action="save-team" data-key="${key}">Save</button>
+            <button class="ghost" data-action="cancel-team" data-key="${key}">Cancel</button>
+          </td>
+        </tr>`;
+    }
+    return `
+      <tr data-key="${key}">
         <td><span class="initials-pill">${escapeHtml(t.Initials)}</span></td>
         <td>${escapeHtml(t.Name || '')}</td>
         <td>${escapeHtml(t.Role || '')}</td>
         <td class="row-actions">
-          <button class="danger" data-initials="${escapeAttr(t.Initials)}">&#10005;</button>
+          <button class="icon" data-action="edit-team" data-key="${key}" title="Edit">&#9998;</button>
+          <button class="danger" data-action="delete-team" data-key="${key}" title="Delete">&#10005;</button>
         </td>
-      </tr>
-    `).join('');
-    body.querySelectorAll('button[data-initials]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        if (!confirm('Remove ' + btn.dataset.initials + '?')) return;
-        try {
-          await call('deleteTeamMember', btn.dataset.initials);
-          state.team = state.team.filter(t => t.Initials !== btn.dataset.initials);
-          renderTeam();
-          renderInitialsFilter();
-          toast('Removed', 'success');
-        } catch (err) {
-          toast('Delete failed: ' + (err.message || err), 'error');
+      </tr>`;
+  }
+
+  function bindTeamRowEvents() {
+    const body = document.getElementById('team-body');
+    body.querySelectorAll('button[data-action]').forEach(btn => {
+      btn.addEventListener('click', () => handleTeamAction(btn.dataset.action, btn.dataset.key, btn));
+    });
+    body.querySelectorAll('tr[data-editing="true"] input').forEach(inp => {
+      inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const row = inp.closest('tr');
+          handleTeamAction('save-team', row.dataset.key);
+        } else if (e.key === 'Escape') {
+          const row = inp.closest('tr');
+          handleTeamAction('cancel-team', row.dataset.key);
         }
       });
     });
+    const firstInput = body.querySelector('tr[data-editing="true"] input[data-field="Initials"]');
+    if (firstInput) firstInput.focus();
+  }
+
+  async function handleTeamAction(action, key) {
+    const member = state.team.find(t => t.Initials === key);
+    if (action === 'edit-team') {
+      const body = document.getElementById('team-body');
+      body.querySelectorAll('tr[data-editing="true"]').forEach(tr => {
+        const orig = state.team.find(t => t.Initials === tr.dataset.key);
+        if (orig) tr.outerHTML = teamRowHtml(orig, false);
+      });
+      const row = body.querySelector(`tr[data-key="${cssEscape(key)}"]`);
+      if (row && member) row.outerHTML = teamRowHtml(member, true);
+      bindTeamRowEvents();
+      return;
+    }
+    if (action === 'cancel-team') {
+      const row = document.querySelector(`#team-body tr[data-key="${cssEscape(key)}"]`);
+      if (row && member) row.outerHTML = teamRowHtml(member, false);
+      bindTeamRowEvents();
+      return;
+    }
+    if (action === 'save-team') {
+      const row = document.querySelector(`#team-body tr[data-key="${cssEscape(key)}"][data-editing="true"]`);
+      if (!row) return;
+      const newInitials = row.querySelector('[data-field="Initials"]').value.trim();
+      const newName = row.querySelector('[data-field="Name"]').value.trim();
+      const newRole = row.querySelector('[data-field="Role"]').value.trim();
+      if (!newInitials || !newName) {
+        toast('Initials and Name are required', 'error');
+        return;
+      }
+      try {
+        await call('updateTeamMember', {
+          OriginalInitials: key,
+          Initials: newInitials,
+          Name: newName,
+          Role: newRole
+        });
+        const data = await call('getDashboardData');
+        applyData(data);
+        toast('Updated', 'success');
+      } catch (err) {
+        toast('Update failed: ' + (err.message || err), 'error');
+      }
+      return;
+    }
+    if (action === 'delete-team') {
+      if (!confirm('Remove ' + key + '?')) return;
+      try {
+        await call('deleteTeamMember', key);
+        state.team = state.team.filter(t => t.Initials !== key);
+        renderTeam();
+        renderInitialsFilter();
+        toast('Removed', 'success');
+      } catch (err) {
+        toast('Delete failed: ' + (err.message || err), 'error');
+      }
+    }
+  }
+
+  function cssEscape(s) {
+    if (window.CSS && CSS.escape) return CSS.escape(s);
+    return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
   }
 
   /* ---------- Custom columns ---------- */
