@@ -32,6 +32,7 @@
     bindTeamForm();
     bindColumnForm();
     bindImportModal();
+    bindDupeModal();
     bindFilters();
     try {
       const data = await call('getDashboardData');
@@ -47,6 +48,7 @@
     state.columns = data.columns || [];
     state.columnTypes = data.columnTypes || state.columnTypes;
     renderAll();
+    refreshDupeBanner();
   }
 
   function renderAll() {
@@ -76,7 +78,7 @@
       { key: 'MainLink', label: 'Main Link', type: 'link' },
       ...state.columns.map(c => ({
         key: c.ColumnName,
-        label: c.ColumnName,
+        label: (c.DisplayName && String(c.DisplayName).trim()) || c.ColumnName,
         type: String(c.ColumnType || 'text').toLowerCase(),
         options: c.Options
       }))
@@ -439,6 +441,7 @@
       const payload = {
         ColumnId: fd.get('ColumnId') || null,
         ColumnName: fd.get('ColumnName'),
+        DisplayName: fd.get('DisplayName') || '',
         ColumnType: fd.get('ColumnType'),
         Options: fd.get('Options') || ''
       };
@@ -466,6 +469,7 @@
     const f = document.getElementById('column-form');
     f.elements.ColumnId.value = col.ColumnId;
     f.elements.ColumnName.value = col.ColumnName;
+    f.elements.DisplayName.value = col.DisplayName || '';
     f.elements.ColumnType.value = String(col.ColumnType || 'text').toLowerCase();
     f.elements.Options.value = col.Options || '';
     toggleOptionsField();
@@ -476,24 +480,27 @@
   function renderColumns() {
     const body = document.getElementById('columns-body');
     if (!state.columns.length) {
-      body.innerHTML = '<tr><td colspan="5" class="empty">No custom columns yet.</td></tr>';
+      body.innerHTML = '<tr><td colspan="6" class="empty">No custom columns yet.</td></tr>';
       return;
     }
-    body.innerHTML = state.columns.map((c, i) => `
+    body.innerHTML = state.columns.map((c, i) => {
+      const display = (c.DisplayName && String(c.DisplayName).trim()) || '';
+      return `
       <tr>
         <td>
           <button class="icon" data-id="${escapeAttr(c.ColumnId)}" data-dir="up" title="Move up" ${i === 0 ? 'disabled' : ''}>&#8593;</button>
           <button class="icon" data-id="${escapeAttr(c.ColumnId)}" data-dir="down" title="Move down" ${i === state.columns.length - 1 ? 'disabled' : ''}>&#8595;</button>
         </td>
-        <td>${escapeHtml(c.ColumnName)}</td>
+        <td><code class="muted small">${escapeHtml(c.ColumnName)}</code></td>
+        <td>${display ? escapeHtml(display) : '<span class="muted small">(same as sheet)</span>'}</td>
         <td><span class="muted small">${escapeHtml(c.ColumnType)}</span></td>
         <td><span class="muted small">${escapeHtml(c.Options || '')}</span></td>
         <td class="row-actions">
           <button class="icon" data-edit="${escapeAttr(c.ColumnId)}" title="Edit">&#9998;</button>
           <button class="danger" data-delete="${escapeAttr(c.ColumnId)}" title="Delete">&#10005;</button>
         </td>
-      </tr>
-    `).join('');
+      </tr>`;
+    }).join('');
 
     body.querySelectorAll('button[data-edit]').forEach(b => {
       b.addEventListener('click', () => startEditColumn(state.columns.find(x => x.ColumnId === b.dataset.edit)));
@@ -529,6 +536,115 @@
       applyData(data);
     } catch (err) {
       toast('Reorder failed: ' + (err.message || err), 'error');
+    }
+  }
+
+  /* ---------- Reconcile duplicates ---------- */
+  function findDuplicateGroupsLocal() {
+    const groups = {};
+    state.cases.forEach(c => {
+      const link = String(c.MainLink || '').trim().toLowerCase().replace(/\/+$/, '');
+      if (!link) return;
+      if (!groups[link]) groups[link] = [];
+      groups[link].push(c);
+    });
+    return Object.keys(groups).filter(k => groups[k].length > 1).map(k => ({ key: k, rows: groups[k] }));
+  }
+
+  function refreshDupeBanner() {
+    const banner = document.getElementById('dupe-banner');
+    const groups = findDuplicateGroupsLocal();
+    if (groups.length === 0) { banner.classList.add('hidden'); return; }
+    const dupRowCount = groups.reduce((n, g) => n + g.rows.length, 0);
+    document.getElementById('dupe-banner-text').textContent =
+      `${dupRowCount} cases share a Main Link with another (${groups.length} group${groups.length === 1 ? '' : 's'}).`;
+    banner.classList.remove('hidden');
+  }
+
+  function bindDupeModal() {
+    document.getElementById('dupe-open').addEventListener('click', openDupeModal);
+    document.getElementById('dupe-cancel').addEventListener('click', closeDupeModal);
+    document.getElementById('dupe-apply').addEventListener('click', applyDupeResolution);
+    document.getElementById('dupe-modal').addEventListener('click', e => {
+      if (e.target.id === 'dupe-modal') closeDupeModal();
+    });
+  }
+
+  async function openDupeModal() {
+    try {
+      const groups = await call('findDuplicateCases');
+      if (!groups || groups.length === 0) {
+        toast('No duplicates found', 'success');
+        refreshDupeBanner();
+        return;
+      }
+      renderDupeGroups(groups);
+      document.getElementById('dupe-modal').classList.remove('hidden');
+    } catch (err) {
+      toast('Failed: ' + (err.message || err), 'error');
+    }
+  }
+
+  function closeDupeModal() {
+    document.getElementById('dupe-modal').classList.add('hidden');
+  }
+
+  function renderDupeGroups(groups) {
+    const container = document.getElementById('dupe-groups');
+    container.innerHTML = groups.map((g, gi) => {
+      const rowsHtml = g.rows.map((r, ri) => {
+        const member = memberById(r.MemberId);
+        const initials = member ? member.Initials : (r.MemberId || '?');
+        const fields = state.columns.map(c => {
+          const label = (c.DisplayName && String(c.DisplayName).trim()) || c.ColumnName;
+          const v = r[c.ColumnName];
+          if (v == null || v === '') return '';
+          return `<div class="muted small"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(String(v))}</div>`;
+        }).join('');
+        const safeLink = /^https?:\/\//i.test(r.MainLink || '') ? r.MainLink : 'https://' + (r.MainLink || '');
+        return `<label class="dupe-row${ri === 0 ? ' kept' : ''}">
+          <input type="radio" name="keep-${gi}" value="${escapeAttr(r.ID)}" ${ri === 0 ? 'checked' : ''}>
+          <div style="flex:1">
+            <div><span class="initials-pill">${escapeHtml(initials)}</span>
+              <a href="${escapeAttr(safeLink)}" target="_blank" rel="noopener">${escapeHtml(r.MainLink || '')}</a></div>
+            ${fields}
+          </div>
+        </label>`;
+      }).join('');
+      return `<div class="dupe-group" data-group="${gi}">
+        <h3 class="muted small" style="text-transform:uppercase;letter-spacing:.03em">Group ${gi + 1} — ${g.rows.length} rows</h3>
+        ${rowsHtml}
+      </div>`;
+    }).join('');
+    container.querySelectorAll('input[type="radio"]').forEach(input => {
+      input.addEventListener('change', () => {
+        const groupEl = input.closest('.dupe-group');
+        groupEl.querySelectorAll('.dupe-row').forEach(r => r.classList.remove('kept'));
+        input.closest('.dupe-row').classList.add('kept');
+      });
+    });
+    document.getElementById('dupe-apply').disabled = false;
+  }
+
+  async function applyDupeResolution() {
+    const radios = document.querySelectorAll('#dupe-groups input[type="radio"]:checked');
+    const keepIds = {};
+    radios.forEach(r => { keepIds[String(r.value)] = true; });
+    const groups = await call('findDuplicateCases');
+    const toDelete = [];
+    groups.forEach(g => g.rows.forEach(r => { if (!keepIds[String(r.ID)]) toDelete.push(r.ID); }));
+    if (toDelete.length === 0) { toast('Nothing to delete', 'error'); return; }
+    if (!confirm(`Delete ${toDelete.length} duplicate case${toDelete.length === 1 ? '' : 's'}?`)) return;
+    try {
+      for (let i = 0; i < toDelete.length; i++) {
+        await call('deleteCase', toDelete[i]);
+      }
+      closeDupeModal();
+      const data = await call('getDashboardData');
+      applyData(data);
+      toast(`Deleted ${toDelete.length} duplicate${toDelete.length === 1 ? '' : 's'}`, 'success');
+    } catch (err) {
+      toast('Failed: ' + (err.message || err), 'error');
     }
   }
 

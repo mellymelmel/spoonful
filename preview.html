@@ -95,6 +95,24 @@
 
   .empty { text-align: center; color: var(--muted); padding: 32px; }
 
+  .banner {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 10px 14px; border-radius: 8px;
+    border: 1px solid; margin-bottom: 12px;
+  }
+  .banner-warn { background: #fff8c5; border-color: #d4a72c; color: #59450c; }
+
+  .dupe-group { border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin-bottom: 12px; }
+  .dupe-group h3 { margin: 0 0 6px; font-size: 11px; }
+  .dupe-row {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 8px; border-radius: 6px; cursor: pointer;
+  }
+  .dupe-row:hover { background: #f6f8fa; }
+  .dupe-row input[type="radio"] { margin-top: 4px; }
+  .dupe-row.kept { background: #ddf4ff; }
+  .dupe-row.kept:hover { background: #c5e8ff; }
+
   .settings-grid { display: grid; gap: 20px; grid-template-columns: 1fr; }
   @media (min-width: 980px) { .settings-grid { grid-template-columns: 1fr 1fr; } }
   .card {
@@ -182,6 +200,11 @@
         <button id="add-case-btn" class="primary">+ Add Case</button>
       </div>
 
+      <div id="dupe-banner" class="banner banner-warn hidden">
+        <span id="dupe-banner-text"></span>
+        <button type="button" id="dupe-open" class="primary">Reconcile</button>
+      </div>
+
       <div class="table-wrap">
         <table id="cases-table">
           <thead><tr id="cases-head"></tr></thead>
@@ -211,10 +234,11 @@
 
         <div class="card">
           <h2>Custom Columns</h2>
-          <p class="muted small">"Member" and "Main Link" are built in. Add your own columns below or bulk-import from a Google Sheet.</p>
+          <p class="muted small">"Member" and "Main Link" are built in. The <strong>Sheet column</strong> matches the header in your Google Sheet (the source of truth). The <strong>Display name</strong> is what shows in the dashboard — editing it never touches the sheet.</p>
           <form id="column-form" class="inline-form">
             <input type="hidden" name="ColumnId" value="">
-            <input type="text" name="ColumnName" placeholder="Column name" required autocomplete="off">
+            <input type="text" name="ColumnName" placeholder="Sheet column (e.g. Status)" required autocomplete="off">
+            <input type="text" name="DisplayName" placeholder="Display name (optional)" autocomplete="off">
             <select name="ColumnType" id="column-type"></select>
             <input type="text" name="Options" id="column-options" placeholder="Options (comma-separated)" autocomplete="off" disabled>
             <button type="submit" class="primary">Save</button>
@@ -224,7 +248,7 @@
             <button type="button" id="bulk-import-btn" class="ghost">+ Bulk import from Sheet/CSV...</button>
           </div>
           <table class="settings-table">
-            <thead><tr><th>Order</th><th>Name</th><th>Type</th><th>Options</th><th></th></tr></thead>
+            <thead><tr><th>Order</th><th>Sheet column</th><th>Display name</th><th>Type</th><th>Options</th><th></th></tr></thead>
             <tbody id="columns-body"></tbody>
           </table>
         </div>
@@ -296,6 +320,18 @@
     </div>
   </div>
 
+  <div id="dupe-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content" style="max-width:760px">
+      <h2>Reconcile duplicates</h2>
+      <p class="muted small">Cases sharing the same Main Link. Pick one to keep in each group; the others will be deleted.</p>
+      <div id="dupe-groups"></div>
+      <div class="modal-actions">
+        <button type="button" id="dupe-cancel" class="ghost">Cancel</button>
+        <button type="button" id="dupe-apply" class="primary" disabled>Apply</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast hidden"></div>
   <div id="loader" class="loader hidden"><div class="spinner"></div></div>
 
@@ -324,7 +360,9 @@
       cases: [
         { ID: uuid(), MemberId: 'M001', MainLink: 'https://example.com/case/123', Status: 'Open', Priority: 'High' },
         { ID: uuid(), MemberId: 'M002', MainLink: 'https://example.com/case/124', Status: 'In Review', Priority: 'Medium' },
-        { ID: uuid(), MemberId: 'M001', MainLink: 'https://example.com/case/125', Status: 'Closed', Priority: 'Low' }
+        { ID: uuid(), MemberId: 'M001', MainLink: 'https://example.com/case/125', Status: 'Closed', Priority: 'Low' },
+        // intentional duplicate of the first row's MainLink to demo Reconcile
+        { ID: uuid(), MemberId: 'M003', MainLink: 'https://example.com/case/123', Status: 'Open', Priority: 'Medium' }
       ],
       team: [
         { MemberId: 'M001', Initials: 'AB', Name: 'Alice Brown', Role: 'Investigator' },
@@ -332,8 +370,8 @@
         { MemberId: 'M003', Initials: 'EF', Name: 'Erin Foster', Role: 'Lead' }
       ],
       columns: [
-        { ColumnId: uuid(), ColumnName: 'Status', ColumnType: 'dropdown', Options: 'Open, In Review, Closed', Order: 0 },
-        { ColumnId: uuid(), ColumnName: 'Priority', ColumnType: 'dropdown', Options: 'Low, Medium, High', Order: 1 }
+        { ColumnId: uuid(), ColumnName: 'Status', DisplayName: 'Case Status', ColumnType: 'dropdown', Options: 'Open, In Review, Closed', Order: 0 },
+        { ColumnId: uuid(), ColumnName: 'Priority', DisplayName: '', ColumnType: 'dropdown', Options: 'Low, Medium, High', Order: 1 }
       ]
     };
     save(seed);
@@ -444,31 +482,39 @@
     },
 
     saveColumn(payload) {
-      if (!payload || !payload.ColumnName) throw new Error('ColumnName is required');
+      if (!payload || !payload.ColumnName) throw new Error('Sheet column name is required');
       const type = String(payload.ColumnType || 'text').toLowerCase();
       if (COLUMN_TYPES.indexOf(type) === -1) throw new Error('Invalid column type: ' + type);
       const name = String(payload.ColumnName).trim();
-      if (['ID', 'MemberId', 'MainLink'].indexOf(name) !== -1) {
-        throw new Error('Column name conflicts with a built-in column');
+      const displayName = String(payload.DisplayName == null ? '' : payload.DisplayName).trim();
+      if (FIXED_CASE_KEYS.indexOf(name) !== -1) {
+        throw new Error('"' + name + '" is a built-in column name');
       }
       const db = load();
       const id = payload.ColumnId || uuid();
       const order = payload.Order != null && payload.Order !== '' ? Number(payload.Order) : db.columns.length;
       const options = String(payload.Options || '').trim();
       const idx = db.columns.findIndex(c => c.ColumnId === id);
-      if (idx === -1) db.columns.push({ ColumnId: id, ColumnName: name, ColumnType: type, Options: options, Order: order });
-      else {
-        const oldName = db.columns[idx].ColumnName;
-        db.columns[idx] = { ColumnId: id, ColumnName: name, ColumnType: type, Options: options, Order: order };
-        if (oldName !== name) {
-          db.cases = db.cases.map(c => {
-            if (oldName in c) { const v = c[oldName]; const n = Object.assign({}, c); delete n[oldName]; n[name] = v; return n; }
-            return c;
-          });
-        }
-      }
+      const record = { ColumnId: id, ColumnName: name, DisplayName: displayName, ColumnType: type, Options: options, Order: order };
+      if (idx === -1) db.columns.push(record);
+      else db.columns[idx] = record;
       save(db);
       return { ok: true, id };
+    },
+    findDuplicateCases() {
+      const cases = handlers.getCases();
+      const groups = {};
+      cases.forEach(c => {
+        const link = String(c.MainLink || '').trim().toLowerCase().replace(/\/+$/, '');
+        if (!link) return;
+        if (!groups[link]) groups[link] = [];
+        groups[link].push(c);
+      });
+      const out = [];
+      Object.keys(groups).forEach(k => {
+        if (groups[k].length > 1) out.push({ key: k, rows: groups[k] });
+      });
+      return out;
     },
     deleteColumn(columnId) {
       // Non-destructive: only the dashboard config row is removed.
@@ -534,15 +580,17 @@
     const looksLikeHeader = firstRow.some(c =>
       c.includes('name') || c.includes('type') || c.includes('option') || c === 'column'
     );
-    let dataRows, idxName, idxType, idxOptions;
+    let dataRows, idxName, idxDisplay, idxType, idxOptions;
     if (looksLikeHeader) {
-      idxName = firstRow.findIndex(c => c.includes('name') || c === 'column');
+      idxDisplay = firstRow.findIndex(c => c.includes('display'));
+      idxName = firstRow.findIndex(c => (c.includes('name') && !c.includes('display')) || c === 'column');
       if (idxName === -1) idxName = 0;
       idxType = firstRow.findIndex(c => c.includes('type'));
       idxOptions = firstRow.findIndex(c => c.includes('option'));
       dataRows = rows.slice(1);
     } else {
       idxName = 0;
+      idxDisplay = -1;
       idxType = rows[0].length > 1 ? 1 : -1;
       idxOptions = rows[0].length > 2 ? 2 : -1;
       dataRows = rows;
@@ -551,13 +599,21 @@
     dataRows.forEach(r => {
       const name = String(r[idxName] == null ? '' : r[idxName]).trim();
       if (!name) return;
+      const display = idxDisplay >= 0 ? String(r[idxDisplay] == null ? '' : r[idxDisplay]).trim() : '';
       const rawType = idxType >= 0 ? String(r[idxType] == null ? '' : r[idxType]).toLowerCase().trim() : '';
       const type = rawType || 'text';
       const opts = idxOptions >= 0 ? String(r[idxOptions] == null ? '' : r[idxOptions]).trim() : '';
       let valid = true, error = '';
       if (FIXED_CASE_KEYS.indexOf(name) !== -1) { valid = false; error = 'Reserved column name'; }
       else if (COLUMN_TYPES.indexOf(type) === -1) { valid = false; error = 'Invalid type "' + type + '"'; }
-      items.push({ ColumnName: name, ColumnType: type, Options: opts, valid: valid, error: error });
+      items.push({
+        ColumnName: name,
+        DisplayName: display || name,
+        ColumnType: type,
+        Options: opts,
+        valid: valid,
+        error: error
+      });
     });
     return { items: items, hadHeaders: looksLikeHeader };
   }
@@ -571,7 +627,7 @@
     (items || []).forEach(it => {
       if (!it.valid) { result.errors.push((it.ColumnName || '(blank)') + ': ' + it.error); return; }
       if (existingNames[String(it.ColumnName).toLowerCase()]) { result.skipped++; return; }
-      db.columns.push({ ColumnId: uuid(), ColumnName: it.ColumnName, ColumnType: it.ColumnType, Options: it.Options, Order: order++ });
+      db.columns.push({ ColumnId: uuid(), ColumnName: it.ColumnName, DisplayName: it.DisplayName || '', ColumnType: it.ColumnType, Options: it.Options, Order: order++ });
       existingNames[String(it.ColumnName).toLowerCase()] = true;
       result.added++;
     });
@@ -669,6 +725,7 @@
     bindTeamForm();
     bindColumnForm();
     bindImportModal();
+    bindDupeModal();
     bindFilters();
     try {
       const data = await call('getDashboardData');
@@ -684,6 +741,7 @@
     state.columns = data.columns || [];
     state.columnTypes = data.columnTypes || state.columnTypes;
     renderAll();
+    refreshDupeBanner();
   }
 
   function renderAll() {
@@ -711,7 +769,7 @@
       { key: 'MainLink', label: 'Main Link', type: 'link' },
       ...state.columns.map(c => ({
         key: c.ColumnName,
-        label: c.ColumnName,
+        label: (c.DisplayName && String(c.DisplayName).trim()) || c.ColumnName,
         type: String(c.ColumnType || 'text').toLowerCase(),
         options: c.Options
       }))
@@ -1069,6 +1127,7 @@
       const payload = {
         ColumnId: fd.get('ColumnId') || null,
         ColumnName: fd.get('ColumnName'),
+        DisplayName: fd.get('DisplayName') || '',
         ColumnType: fd.get('ColumnType'),
         Options: fd.get('Options') || ''
       };
@@ -1096,6 +1155,7 @@
     const f = document.getElementById('column-form');
     f.elements.ColumnId.value = col.ColumnId;
     f.elements.ColumnName.value = col.ColumnName;
+    f.elements.DisplayName.value = col.DisplayName || '';
     f.elements.ColumnType.value = String(col.ColumnType || 'text').toLowerCase();
     f.elements.Options.value = col.Options || '';
     toggleOptionsField();
@@ -1106,24 +1166,27 @@
   function renderColumns() {
     const body = document.getElementById('columns-body');
     if (!state.columns.length) {
-      body.innerHTML = '<tr><td colspan="5" class="empty">No custom columns yet.</td></tr>';
+      body.innerHTML = '<tr><td colspan="6" class="empty">No custom columns yet.</td></tr>';
       return;
     }
-    body.innerHTML = state.columns.map((c, i) => `
+    body.innerHTML = state.columns.map((c, i) => {
+      const display = (c.DisplayName && String(c.DisplayName).trim()) || '';
+      return `
       <tr>
         <td>
           <button class="icon" data-id="${escapeAttr(c.ColumnId)}" data-dir="up" title="Move up" ${i === 0 ? 'disabled' : ''}>&#8593;</button>
           <button class="icon" data-id="${escapeAttr(c.ColumnId)}" data-dir="down" title="Move down" ${i === state.columns.length - 1 ? 'disabled' : ''}>&#8595;</button>
         </td>
-        <td>${escapeHtml(c.ColumnName)}</td>
+        <td><code class="muted small">${escapeHtml(c.ColumnName)}</code></td>
+        <td>${display ? escapeHtml(display) : '<span class="muted small">(same as sheet)</span>'}</td>
         <td><span class="muted small">${escapeHtml(c.ColumnType)}</span></td>
         <td><span class="muted small">${escapeHtml(c.Options || '')}</span></td>
         <td class="row-actions">
           <button class="icon" data-edit="${escapeAttr(c.ColumnId)}" title="Edit">&#9998;</button>
           <button class="danger" data-delete="${escapeAttr(c.ColumnId)}" title="Delete">&#10005;</button>
         </td>
-      </tr>
-    `).join('');
+      </tr>`;
+    }).join('');
 
     body.querySelectorAll('button[data-edit]').forEach(b => {
       b.addEventListener('click', () => startEditColumn(state.columns.find(x => x.ColumnId === b.dataset.edit)));
@@ -1159,6 +1222,115 @@
       applyData(data);
     } catch (err) {
       toast('Reorder failed: ' + (err.message || err), 'error');
+    }
+  }
+
+  /* ---------- Reconcile duplicates ---------- */
+  function findDuplicateGroupsLocal() {
+    const groups = {};
+    state.cases.forEach(c => {
+      const link = String(c.MainLink || '').trim().toLowerCase().replace(/\/+$/, '');
+      if (!link) return;
+      if (!groups[link]) groups[link] = [];
+      groups[link].push(c);
+    });
+    return Object.keys(groups).filter(k => groups[k].length > 1).map(k => ({ key: k, rows: groups[k] }));
+  }
+
+  function refreshDupeBanner() {
+    const banner = document.getElementById('dupe-banner');
+    const groups = findDuplicateGroupsLocal();
+    if (groups.length === 0) { banner.classList.add('hidden'); return; }
+    const dupRowCount = groups.reduce((n, g) => n + g.rows.length, 0);
+    document.getElementById('dupe-banner-text').textContent =
+      `${dupRowCount} cases share a Main Link with another (${groups.length} group${groups.length === 1 ? '' : 's'}).`;
+    banner.classList.remove('hidden');
+  }
+
+  function bindDupeModal() {
+    document.getElementById('dupe-open').addEventListener('click', openDupeModal);
+    document.getElementById('dupe-cancel').addEventListener('click', closeDupeModal);
+    document.getElementById('dupe-apply').addEventListener('click', applyDupeResolution);
+    document.getElementById('dupe-modal').addEventListener('click', e => {
+      if (e.target.id === 'dupe-modal') closeDupeModal();
+    });
+  }
+
+  async function openDupeModal() {
+    try {
+      const groups = await call('findDuplicateCases');
+      if (!groups || groups.length === 0) {
+        toast('No duplicates found', 'success');
+        refreshDupeBanner();
+        return;
+      }
+      renderDupeGroups(groups);
+      document.getElementById('dupe-modal').classList.remove('hidden');
+    } catch (err) {
+      toast('Failed: ' + (err.message || err), 'error');
+    }
+  }
+
+  function closeDupeModal() {
+    document.getElementById('dupe-modal').classList.add('hidden');
+  }
+
+  function renderDupeGroups(groups) {
+    const container = document.getElementById('dupe-groups');
+    container.innerHTML = groups.map((g, gi) => {
+      const rowsHtml = g.rows.map((r, ri) => {
+        const member = memberById(r.MemberId);
+        const initials = member ? member.Initials : (r.MemberId || '?');
+        const fields = state.columns.map(c => {
+          const label = (c.DisplayName && String(c.DisplayName).trim()) || c.ColumnName;
+          const v = r[c.ColumnName];
+          if (v == null || v === '') return '';
+          return `<div class="muted small"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(String(v))}</div>`;
+        }).join('');
+        const safeLink = /^https?:\/\//i.test(r.MainLink || '') ? r.MainLink : 'https://' + (r.MainLink || '');
+        return `<label class="dupe-row${ri === 0 ? ' kept' : ''}">
+          <input type="radio" name="keep-${gi}" value="${escapeAttr(r.ID)}" ${ri === 0 ? 'checked' : ''}>
+          <div style="flex:1">
+            <div><span class="initials-pill">${escapeHtml(initials)}</span>
+              <a href="${escapeAttr(safeLink)}" target="_blank" rel="noopener">${escapeHtml(r.MainLink || '')}</a></div>
+            ${fields}
+          </div>
+        </label>`;
+      }).join('');
+      return `<div class="dupe-group" data-group="${gi}">
+        <h3 class="muted small" style="text-transform:uppercase;letter-spacing:.03em">Group ${gi + 1} — ${g.rows.length} rows</h3>
+        ${rowsHtml}
+      </div>`;
+    }).join('');
+    container.querySelectorAll('input[type="radio"]').forEach(input => {
+      input.addEventListener('change', () => {
+        const groupEl = input.closest('.dupe-group');
+        groupEl.querySelectorAll('.dupe-row').forEach(r => r.classList.remove('kept'));
+        input.closest('.dupe-row').classList.add('kept');
+      });
+    });
+    document.getElementById('dupe-apply').disabled = false;
+  }
+
+  async function applyDupeResolution() {
+    const radios = document.querySelectorAll('#dupe-groups input[type="radio"]:checked');
+    const keepIds = {};
+    radios.forEach(r => { keepIds[String(r.value)] = true; });
+    const groups = await call('findDuplicateCases');
+    const toDelete = [];
+    groups.forEach(g => g.rows.forEach(r => { if (!keepIds[String(r.ID)]) toDelete.push(r.ID); }));
+    if (toDelete.length === 0) { toast('Nothing to delete', 'error'); return; }
+    if (!confirm(`Delete ${toDelete.length} duplicate case${toDelete.length === 1 ? '' : 's'}?`)) return;
+    try {
+      for (let i = 0; i < toDelete.length; i++) {
+        await call('deleteCase', toDelete[i]);
+      }
+      closeDupeModal();
+      const data = await call('getDashboardData');
+      applyData(data);
+      toast(`Deleted ${toDelete.length} duplicate${toDelete.length === 1 ? '' : 's'}`, 'success');
+    } catch (err) {
+      toast('Failed: ' + (err.message || err), 'error');
     }
   }
 

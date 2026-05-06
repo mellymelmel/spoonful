@@ -25,6 +25,11 @@
         <button id="add-case-btn" class="primary">+ Add Case</button>
       </div>
 
+      <div id="dupe-banner" class="banner banner-warn hidden">
+        <span id="dupe-banner-text"></span>
+        <button type="button" id="dupe-open" class="primary">Reconcile</button>
+      </div>
+
       <div class="table-wrap">
         <table id="cases-table">
           <thead><tr id="cases-head"></tr></thead>
@@ -55,10 +60,11 @@
 
         <div class="card">
           <h2>Custom Columns</h2>
-          <p class="muted small">"Member" and "Main Link" are built in. Add your own columns below or bulk-import from a Google Sheet.</p>
+          <p class="muted small">"Member" and "Main Link" are built in. The <strong>Sheet column</strong> matches the header in your Google Sheet (the source of truth). The <strong>Display name</strong> is what shows in the dashboard — editing it never touches the sheet.</p>
           <form id="column-form" class="inline-form">
             <input type="hidden" name="ColumnId" value="">
-            <input type="text" name="ColumnName" placeholder="Column name" required autocomplete="off">
+            <input type="text" name="ColumnName" placeholder="Sheet column (e.g. Status)" required autocomplete="off">
+            <input type="text" name="DisplayName" placeholder="Display name (optional)" autocomplete="off">
             <select name="ColumnType" id="column-type"></select>
             <input type="text" name="Options" id="column-options" placeholder="Options (comma-separated)" autocomplete="off" disabled>
             <button type="submit" class="primary">Save</button>
@@ -68,7 +74,7 @@
             <button type="button" id="bulk-import-btn" class="ghost">+ Bulk import from Sheet/CSV...</button>
           </div>
           <table class="settings-table">
-            <thead><tr><th>Order</th><th>Name</th><th>Type</th><th>Options</th><th></th></tr></thead>
+            <thead><tr><th>Order</th><th>Sheet column</th><th>Display name</th><th>Type</th><th>Options</th><th></th></tr></thead>
             <tbody id="columns-body"></tbody>
           </table>
         </div>
@@ -137,6 +143,19 @@
       <div class="modal-actions">
         <button type="button" id="import-cancel" class="ghost">Cancel</button>
         <button type="button" id="import-confirm" class="primary" disabled>Import</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== Reconcile-duplicates modal ==================== -->
+  <div id="dupe-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content" style="max-width:760px">
+      <h2>Reconcile duplicates</h2>
+      <p class="muted small">Cases sharing the same Main Link. Pick one to keep in each group; the others will be deleted.</p>
+      <div id="dupe-groups"></div>
+      <div class="modal-actions">
+        <button type="button" id="dupe-cancel" class="ghost">Cancel</button>
+        <button type="button" id="dupe-apply" class="primary" disabled>Apply</button>
       </div>
     </div>
   </div>

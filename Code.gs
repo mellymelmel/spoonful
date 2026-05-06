@@ -23,7 +23,7 @@ const COLUMNS_SHEET = 'Columns';
 
 const CASES_FIXED_HEADERS = ['ID', 'MemberId', 'MainLink'];
 const TEAM_HEADERS = ['MemberId', 'Initials', 'Name', 'Role'];
-const COLUMNS_HEADERS = ['ColumnId', 'ColumnName', 'ColumnType', 'Options', 'Order'];
+const COLUMNS_HEADERS = ['ColumnId', 'ColumnName', 'DisplayName', 'ColumnType', 'Options', 'Order'];
 
 const COLUMN_TYPES = ['text', 'number', 'date', 'link', 'dropdown', 'checkbox'];
 
@@ -84,7 +84,29 @@ function ensureSchema_() {
   getOrCreateSheet_(ss, TEAM_SHEET, TEAM_HEADERS);
   getOrCreateSheet_(ss, COLUMNS_SHEET, COLUMNS_HEADERS);
   migrateInitialsToMemberId_();
+  migrateColumnsAddDisplayName_();
   ensureCasesHeaders_(ss.getSheetByName(CASES_SHEET));
+}
+
+/**
+ * Add a DisplayName column to the Columns sheet for projects created before
+ * the display-name feature. Defaults DisplayName to ColumnName for each row.
+ */
+function migrateColumnsAddDisplayName_() {
+  const ss = getSpreadsheet_();
+  const sheet = ss.getSheetByName(COLUMNS_SHEET);
+  if (!sheet) return;
+  const lastCol = sheet.getLastColumn();
+  if (lastCol < 1) return;
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+  if (headers.indexOf('DisplayName') !== -1) return;
+  sheet.insertColumnAfter(2);
+  sheet.getRange(1, 3).setValue('DisplayName').setFontWeight('bold');
+  const lastRow = sheet.getLastRow();
+  if (lastRow >= 2) {
+    const names = sheet.getRange(2, 2, lastRow - 1, 1).getValues();
+    sheet.getRange(2, 3, lastRow - 1, 1).setValues(names);
+  }
 }
 
 /**
@@ -383,14 +405,21 @@ function getCustomColumns() {
   return getCustomColumns_();
 }
 
+/**
+ * ColumnName is the actual header in the Cases sheet (the "key"). Edits to it
+ * never rename the underlying sheet header — they just point this dashboard
+ * column at a different sheet column. DisplayName is the cosmetic label shown
+ * in the dashboard; defaults to ColumnName when blank.
+ */
 function saveColumn(payload) {
   ensureSchema_();
-  if (!payload || !payload.ColumnName) throw new Error('ColumnName is required');
+  if (!payload || !payload.ColumnName) throw new Error('Sheet column name is required');
   const type = String(payload.ColumnType || 'text').toLowerCase();
   if (COLUMN_TYPES.indexOf(type) === -1) throw new Error('Invalid column type: ' + type);
   const name = String(payload.ColumnName).trim();
+  const displayName = String(payload.DisplayName == null ? '' : payload.DisplayName).trim() || name;
   if (CASES_FIXED_HEADERS.indexOf(name) !== -1) {
-    throw new Error('Column name conflicts with a built-in column');
+    throw new Error('"' + name + '" is a built-in column name');
   }
   const ss = getSpreadsheet_();
   const sheet = ss.getSheetByName(COLUMNS_SHEET);
@@ -403,15 +432,14 @@ function saveColumn(payload) {
     const values = sheet.getRange(2, 1, lastRow - 1, COLUMNS_HEADERS.length).getValues();
     for (let i = 0; i < values.length; i++) {
       if (String(values[i][0]) === id) {
-        const oldName = String(values[i][1]);
-        sheet.getRange(i + 2, 1, 1, COLUMNS_HEADERS.length).setValues([[id, name, type, options, order]]);
-        if (oldName !== name) renameCasesHeader_(oldName, name);
+        sheet.getRange(i + 2, 1, 1, COLUMNS_HEADERS.length)
+          .setValues([[id, name, displayName, type, options, order]]);
         ensureCasesHeaders_(ss.getSheetByName(CASES_SHEET));
         return { ok: true, id };
       }
     }
   }
-  sheet.appendRow([id, name, type, options, order]);
+  sheet.appendRow([id, name, displayName, type, options, order]);
   ensureCasesHeaders_(ss.getSheetByName(CASES_SHEET));
   return { ok: true, id };
 }
@@ -452,18 +480,27 @@ function reorderColumns(orderedIds) {
   return { ok: true };
 }
 
-function renameCasesHeader_(oldName, newName) {
-  const ss = getSpreadsheet_();
-  const sheet = ss.getSheetByName(CASES_SHEET);
-  const lastCol = sheet.getLastColumn();
-  if (lastCol < 1) return;
-  const headerRange = sheet.getRange(1, 1, 1, lastCol);
-  const headers = headerRange.getValues()[0];
-  const idx = headers.indexOf(oldName);
-  if (idx !== -1) {
-    headers[idx] = newName;
-    headerRange.setValues([headers]);
-  }
+/* ---------- Duplicate detection ---------- */
+
+/**
+ * Group cases that share a Main Link (case-insensitive, ignoring trailing
+ * slashes). Empty/missing Main Links are skipped. Each returned group has
+ * 2+ rows. Useful for the Reconcile Duplicates flow.
+ */
+function findDuplicateCases() {
+  const cases = getCases();
+  const groups = {};
+  cases.forEach(c => {
+    const link = String(c.MainLink || '').trim().toLowerCase().replace(/\/+$/, '');
+    if (!link) return;
+    if (!groups[link]) groups[link] = [];
+    groups[link].push(c);
+  });
+  const out = [];
+  Object.keys(groups).forEach(k => {
+    if (groups[k].length > 1) out.push({ key: k, rows: groups[k] });
+  });
+  return out;
 }
 
 /* ---------- Bulk column import ----------
@@ -554,15 +591,17 @@ function parseColumnRows_(rows) {
   const looksLikeHeader = firstRow.some(c =>
     c.includes('name') || c.includes('type') || c.includes('option') || c === 'column'
   );
-  let dataRows, idxName, idxType, idxOptions;
+  let dataRows, idxName, idxDisplay, idxType, idxOptions;
   if (looksLikeHeader) {
-    idxName = firstRow.findIndex(c => c.includes('name') || c === 'column');
+    idxDisplay = firstRow.findIndex(c => c.includes('display'));
+    idxName = firstRow.findIndex(c => (c.includes('name') && !c.includes('display')) || c === 'column');
     if (idxName === -1) idxName = 0;
     idxType = firstRow.findIndex(c => c.includes('type'));
     idxOptions = firstRow.findIndex(c => c.includes('option'));
     dataRows = rows.slice(1);
   } else {
     idxName = 0;
+    idxDisplay = -1;
     idxType = rows[0].length > 1 ? 1 : -1;
     idxOptions = rows[0].length > 2 ? 2 : -1;
     dataRows = rows;
@@ -572,6 +611,7 @@ function parseColumnRows_(rows) {
   dataRows.forEach(r => {
     const name = String(r[idxName] == null ? '' : r[idxName]).trim();
     if (!name) return;
+    const display = idxDisplay >= 0 ? String(r[idxDisplay] == null ? '' : r[idxDisplay]).trim() : '';
     const rawType = idxType >= 0 ? String(r[idxType] == null ? '' : r[idxType]).toLowerCase().trim() : '';
     const type = rawType || 'text';
     const opts = idxOptions >= 0 ? String(r[idxOptions] == null ? '' : r[idxOptions]).trim() : '';
@@ -584,7 +624,14 @@ function parseColumnRows_(rows) {
       valid = false;
       error = 'Invalid type "' + type + '" (allowed: ' + COLUMN_TYPES.join(', ') + ')';
     }
-    items.push({ ColumnName: name, ColumnType: type, Options: opts, valid: valid, error: error });
+    items.push({
+      ColumnName: name,
+      DisplayName: display || name,
+      ColumnType: type,
+      Options: opts,
+      valid: valid,
+      error: error
+    });
   });
   return { items: items, hadHeaders: looksLikeHeader };
 }
@@ -607,6 +654,7 @@ function applyColumnImport_(items) {
     }
     saveColumn({
       ColumnName: item.ColumnName,
+      DisplayName: item.DisplayName,
       ColumnType: item.ColumnType,
       Options: item.Options,
       Order: order++
