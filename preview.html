@@ -355,7 +355,15 @@
         columnTypes: COLUMN_TYPES
       };
     },
-    getCases() { return load().cases.slice(); },
+    getCases() {
+      const db = load();
+      const designated = FIXED_CASE_KEYS.concat(customColumns().map(c => c.ColumnName));
+      return db.cases.map(r => {
+        const out = {};
+        designated.forEach(k => { out[k] = r[k] == null ? '' : r[k]; });
+        return out;
+      });
+    },
     getTeamMembers() { return load().team.slice(); },
     getCustomColumns() { return customColumns(); },
 
@@ -463,12 +471,10 @@
       return { ok: true, id };
     },
     deleteColumn(columnId) {
+      // Non-destructive: only the dashboard config row is removed.
+      // Underlying case data for that column is preserved.
       const db = load();
-      const col = db.columns.find(c => c.ColumnId === String(columnId));
       db.columns = db.columns.filter(c => c.ColumnId !== String(columnId));
-      if (col) {
-        db.cases = db.cases.map(c => { const n = Object.assign({}, c); delete n[col.ColumnName]; return n; });
-      }
       save(db);
       return { ok: true };
     },
@@ -1124,7 +1130,7 @@
     });
     body.querySelectorAll('button[data-delete]').forEach(b => {
       b.addEventListener('click', async () => {
-        if (!confirm('Delete this column? Existing data in this column will be removed.')) return;
+        if (!confirm('Remove this column from the dashboard? Underlying data in the sheet is preserved.')) return;
         try {
           await call('deleteColumn', b.dataset.delete);
           const data = await call('getDashboardData');

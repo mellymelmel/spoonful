@@ -84,7 +84,7 @@ function ensureSchema_() {
   getOrCreateSheet_(ss, TEAM_SHEET, TEAM_HEADERS);
   getOrCreateSheet_(ss, COLUMNS_SHEET, COLUMNS_HEADERS);
   migrateInitialsToMemberId_();
-  syncCasesHeaders_();
+  ensureCasesHeaders_(ss.getSheetByName(CASES_SHEET));
 }
 
 /**
@@ -139,38 +139,30 @@ function migrateInitialsToMemberId_() {
   }
 }
 
-function syncCasesHeaders_() {
-  const ss = getSpreadsheet_();
-  const cases = ss.getSheetByName(CASES_SHEET);
-  const cols = getCustomColumns_();
-  const desired = CASES_FIXED_HEADERS.concat(cols.map(c => c.ColumnName));
-  const lastCol = Math.max(cases.getLastColumn(), 1);
-  const current = cases.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
-  const trimmed = current.filter(h => h !== '');
-  const same = trimmed.length === desired.length && trimmed.every((h, i) => h === desired[i]);
-  if (same) return;
-
-  // Map existing rows to objects keyed by current header, then rewrite with desired headers.
-  const lastRow = cases.getLastRow();
-  let dataRows = [];
-  if (lastRow > 1) {
-    const values = cases.getRange(2, 1, lastRow - 1, lastCol).getValues();
-    dataRows = values
-      .filter(r => r.some(c => c !== '' && c !== null))
-      .map(r => {
-        const o = {};
-        trimmed.forEach((h, i) => { o[h] = r[i]; });
-        return o;
-      });
+/**
+ * Make sure every designated header (fixed + configured custom columns)
+ * exists in the Cases sheet. Additive only: never deletes or reorders
+ * existing columns. Extra columns the user has in the sheet are preserved.
+ */
+function ensureCasesHeaders_(sheet) {
+  if (!sheet) return;
+  const customCols = getCustomColumns_().map(c => c.ColumnName);
+  const desired = CASES_FIXED_HEADERS.concat(customCols);
+  const lastCol = Math.max(sheet.getLastColumn(), 1);
+  let current = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+  while (current.length && current[current.length - 1] === '') current.pop();
+  if (current.length === 0) {
+    sheet.getRange(1, 1, 1, desired.length).setValues([desired]);
+    sheet.getRange(1, 1, 1, desired.length).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+    return;
   }
-  cases.clear();
-  cases.getRange(1, 1, 1, desired.length).setValues([desired]);
-  cases.setFrozenRows(1);
-  cases.getRange(1, 1, 1, desired.length).setFontWeight('bold');
-  if (dataRows.length) {
-    const out = dataRows.map(o => desired.map(h => (h in o ? o[h] : '')));
-    cases.getRange(2, 1, out.length, desired.length).setValues(out);
-  }
+  const missing = desired.filter(d => current.indexOf(d) === -1);
+  if (missing.length === 0) return;
+  const newHeaders = current.concat(missing);
+  sheet.getRange(1, 1, 1, newHeaders.length).setValues([newHeaders]);
+  sheet.getRange(1, 1, 1, newHeaders.length).setFontWeight('bold');
+  sheet.setFrozenRows(1);
 }
 
 /* ---------- Bootstrap ---------- */
@@ -187,12 +179,23 @@ function getDashboardData() {
 
 /* ---------- Cases ---------- */
 
+/**
+ * Return cases projected to the designated columns only (fixed + configured
+ * custom columns). Extra columns present in the Cases sheet are not exposed.
+ */
 function getCases() {
+  ensureSchema_();
   const ss = getSpreadsheet_();
   const sheet = getOrCreateSheet_(ss, CASES_SHEET, CASES_FIXED_HEADERS);
+  const designated = CASES_FIXED_HEADERS.concat(getCustomColumns_().map(c => c.ColumnName));
   return readSheet_(sheet).rows.map(r => {
-    Object.keys(r).forEach(k => { if (r[k] instanceof Date) r[k] = r[k].toISOString(); });
-    return r;
+    const out = {};
+    designated.forEach(k => {
+      let v = r[k];
+      if (v instanceof Date) v = v.toISOString();
+      out[k] = v == null ? '' : v;
+    });
+    return out;
   });
 }
 
@@ -200,6 +203,7 @@ function addCase(payload) {
   ensureSchema_();
   const ss = getSpreadsheet_();
   const sheet = ss.getSheetByName(CASES_SHEET);
+  ensureCasesHeaders_(sheet);
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   const id = payload.ID || Utilities.getUuid();
   const row = headers.map(h => {
@@ -402,16 +406,20 @@ function saveColumn(payload) {
         const oldName = String(values[i][1]);
         sheet.getRange(i + 2, 1, 1, COLUMNS_HEADERS.length).setValues([[id, name, type, options, order]]);
         if (oldName !== name) renameCasesHeader_(oldName, name);
-        syncCasesHeaders_();
+        ensureCasesHeaders_(ss.getSheetByName(CASES_SHEET));
         return { ok: true, id };
       }
     }
   }
   sheet.appendRow([id, name, type, options, order]);
-  syncCasesHeaders_();
+  ensureCasesHeaders_(ss.getSheetByName(CASES_SHEET));
   return { ok: true, id };
 }
 
+/**
+ * Remove a column from the dashboard config. Data in the underlying Cases
+ * sheet is preserved — the column simply stops being displayed.
+ */
 function deleteColumn(columnId) {
   if (!columnId) throw new Error('columnId required');
   const ss = getSpreadsheet_();
@@ -421,9 +429,7 @@ function deleteColumn(columnId) {
   const values = sheet.getRange(2, 1, lastRow - 1, COLUMNS_HEADERS.length).getValues();
   for (let i = 0; i < values.length; i++) {
     if (String(values[i][0]) === String(columnId)) {
-      const colName = String(values[i][1]);
       sheet.deleteRow(i + 2);
-      removeCasesColumn_(colName);
       return { ok: true };
     }
   }
@@ -443,7 +449,6 @@ function reorderColumns(orderedIds) {
     row[4] = idx === -1 ? 999 : idx;
   });
   range.setValues(values);
-  syncCasesHeaders_();
   return { ok: true };
 }
 
@@ -459,16 +464,6 @@ function renameCasesHeader_(oldName, newName) {
     headers[idx] = newName;
     headerRange.setValues([headers]);
   }
-}
-
-function removeCasesColumn_(name) {
-  const ss = getSpreadsheet_();
-  const sheet = ss.getSheetByName(CASES_SHEET);
-  const lastCol = sheet.getLastColumn();
-  if (lastCol < 1) return;
-  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-  const idx = headers.indexOf(name);
-  if (idx !== -1) sheet.deleteColumn(idx + 1);
 }
 
 /* ---------- Bulk column import ----------

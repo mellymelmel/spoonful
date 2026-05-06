@@ -500,7 +500,7 @@
     });
     body.querySelectorAll('button[data-delete]').forEach(b => {
       b.addEventListener('click', async () => {
-        if (!confirm('Delete this column? Existing data in this column will be removed.')) return;
+        if (!confirm('Remove this column from the dashboard? Underlying data in the sheet is preserved.')) return;
         try {
           await call('deleteColumn', b.dataset.delete);
           const data = await call('getDashboardData');

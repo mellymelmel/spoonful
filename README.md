@@ -17,12 +17,31 @@ role) and the column layout.
 
 ## Backend sheets (auto-created on first run)
 
-- **Cases** — `ID | MemberId | MainLink | <custom columns...>`
+- **Cases** — `ID | MemberId | MainLink | <designated custom columns...>` plus
+  any extra columns the user keeps in the sheet.
 - **TeamMembers** — `MemberId | Initials | Name | Role`
 - **Columns** — `ColumnId | ColumnName | ColumnType | Options | Order`
 
 `MemberId` is the required primary key on `TeamMembers` and the foreign key
 that links a case to a member. `Initials` and `Name` are display labels.
+
+### Cases sheet ↔ dashboard config
+
+The `Columns` sheet is a **view spec** over the `Cases` sheet, not a schema.
+
+- Adding a column in Settings adds the header to the `Cases` sheet only if it
+  isn't already there (additive, never destructive).
+- Removing a column in Settings hides it from the dashboard. The data stays
+  in the sheet; re-adding a column with the same name brings the data back.
+- Renaming a configured column renames the matching header in the `Cases`
+  sheet so values stay aligned.
+- Reordering in Settings only affects display order. The `Cases` sheet's
+  column order is left alone.
+- `getCases` returns rows projected to the designated columns only — extra
+  columns the user keeps in the sheet aren't sent to the browser.
+
+### Migration
+
 Sheets created under the previous schema (Initials as primary key) are
 auto-migrated on first load: a `MemberId` column is inserted, UUIDs are
 generated, and the `Cases` sheet's `Initials` column is rewritten to
