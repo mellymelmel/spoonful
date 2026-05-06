@@ -5,8 +5,14 @@
     columns: [],
     columnTypes: ['text', 'number', 'date', 'link', 'dropdown', 'checkbox'],
     filterText: '',
-    filterInitials: ''
+    filterMemberId: ''
   };
+
+  function memberById(id) {
+    if (id == null || id === '') return null;
+    const target = String(id).trim();
+    return state.team.find(t => String(t.MemberId).trim() === target) || null;
+  }
 
   /* ---------- Server bridge ---------- */
   function call(method, ...args) {
@@ -65,7 +71,7 @@
   /* ---------- Cases rendering ---------- */
   function caseColumns() {
     return [
-      { key: 'Initials', label: 'Initials', type: 'initials' },
+      { key: 'MemberId', label: 'Member', type: 'member' },
       { key: 'MainLink', label: 'Main Link', type: 'link' },
       ...state.columns.map(c => ({
         key: c.ColumnName,
@@ -83,9 +89,11 @@
 
     const filterText = state.filterText.toLowerCase();
     const filtered = state.cases.filter(row => {
-      if (state.filterInitials && String(row.Initials || '').toUpperCase() !== state.filterInitials) return false;
+      if (state.filterMemberId && String(row.MemberId || '').trim() !== state.filterMemberId) return false;
       if (!filterText) return true;
-      return Object.values(row).some(v => String(v || '').toLowerCase().includes(filterText));
+      const member = memberById(row.MemberId);
+      const memberText = member ? `${member.Initials} ${member.Name}` : '';
+      return Object.values(row).concat(memberText).some(v => String(v || '').toLowerCase().includes(filterText));
     });
 
     const body = document.getElementById('cases-body');
@@ -110,10 +118,15 @@
   }
 
   function renderCell(col, value) {
-    if (value == null || value === '') return '';
-    if (col.type === 'initials') {
-      return `<span class="initials-pill">${escapeHtml(value)}</span>`;
+    if (col.type === 'member') {
+      const member = memberById(value);
+      if (!member) {
+        return value ? `<span class="initials-pill missing" title="Unknown member">${escapeHtml(value)}</span>` : '';
+      }
+      const title = `${member.Name}${member.Role ? ' — ' + member.Role : ''}`;
+      return `<span class="initials-pill" title="${escapeAttr(title)}">${escapeHtml(member.Initials)}</span>`;
     }
+    if (value == null || value === '') return '';
     if (col.type === 'link') {
       const href = String(value);
       const safe = /^https?:\/\//i.test(href) ? href : 'https://' + href;
@@ -133,7 +146,9 @@
   function renderInitialsFilter() {
     const sel = document.getElementById('filter-initials');
     const current = sel.value;
-    const opts = state.team.map(t => `<option value="${escapeAttr(t.Initials)}">${escapeHtml(t.Initials)} — ${escapeHtml(t.Name || '')}</option>`).join('');
+    const opts = state.team.map(t =>
+      `<option value="${escapeAttr(t.MemberId)}">${escapeHtml(t.Initials)} — ${escapeHtml(t.Name || '')}</option>`
+    ).join('');
     sel.innerHTML = '<option value="">All team members</option>' + opts;
     if (current) sel.value = current;
   }
@@ -145,7 +160,7 @@
       renderCases();
     });
     document.getElementById('filter-initials').addEventListener('change', e => {
-      state.filterInitials = e.target.value.toUpperCase();
+      state.filterMemberId = e.target.value.trim();
       renderCases();
     });
   }
@@ -173,10 +188,12 @@
 
   function fieldHtml(col, value) {
     const v = value == null ? '' : String(value);
-    if (col.type === 'initials') {
-      const opts = state.team.map(t => `<option value="${escapeAttr(t.Initials)}" ${t.Initials === v ? 'selected' : ''}>${escapeHtml(t.Initials)} — ${escapeHtml(t.Name || '')}</option>`).join('');
+    if (col.type === 'member') {
+      const opts = state.team.map(t =>
+        `<option value="${escapeAttr(t.MemberId)}" ${String(t.MemberId) === v ? 'selected' : ''}>${escapeHtml(t.Initials)} — ${escapeHtml(t.Name || '')}</option>`
+      ).join('');
       return `<div class="field"><label>${escapeHtml(col.label)}</label>
-        <select name="${escapeAttr(col.key)}" required><option value="">Select...</option>${opts}</select></div>`;
+        <select name="${escapeAttr(col.key)}" required><option value="">Select team member...</option>${opts}</select></div>`;
     }
     if (col.type === 'dropdown') {
       const choices = String(col.options || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -256,6 +273,7 @@
       e.preventDefault();
       const fd = new FormData(e.target);
       const payload = {
+        MemberId: fd.get('MemberId'),
         Initials: fd.get('Initials'),
         Name: fd.get('Name'),
         Role: fd.get('Role')
@@ -276,7 +294,7 @@
   function renderTeam() {
     const body = document.getElementById('team-body');
     if (!state.team.length) {
-      body.innerHTML = '<tr><td colspan="4" class="empty">No team members yet.</td></tr>';
+      body.innerHTML = '<tr><td colspan="5" class="empty">No team members yet.</td></tr>';
       return;
     }
     body.innerHTML = state.team.map(t => teamRowHtml(t, false)).join('');
@@ -284,10 +302,11 @@
   }
 
   function teamRowHtml(t, editing) {
-    const key = escapeAttr(t.Initials);
+    const key = escapeAttr(t.MemberId);
     if (editing) {
       return `
         <tr data-key="${key}" data-editing="true">
+          <td><input type="text" data-field="MemberId" value="${escapeAttr(t.MemberId)}" required></td>
           <td><input type="text" data-field="Initials" value="${escapeAttr(t.Initials)}" maxlength="6" required style="width:80px"></td>
           <td><input type="text" data-field="Name" value="${escapeAttr(t.Name || '')}" required></td>
           <td><input type="text" data-field="Role" value="${escapeAttr(t.Role || '')}"></td>
@@ -299,6 +318,7 @@
     }
     return `
       <tr data-key="${key}">
+        <td><code class="muted small">${escapeHtml(t.MemberId)}</code></td>
         <td><span class="initials-pill">${escapeHtml(t.Initials)}</span></td>
         <td>${escapeHtml(t.Name || '')}</td>
         <td>${escapeHtml(t.Role || '')}</td>
@@ -326,16 +346,16 @@
         }
       });
     });
-    const firstInput = body.querySelector('tr[data-editing="true"] input[data-field="Initials"]');
+    const firstInput = body.querySelector('tr[data-editing="true"] input[data-field="MemberId"]');
     if (firstInput) firstInput.focus();
   }
 
   async function handleTeamAction(action, key) {
-    const member = state.team.find(t => t.Initials === key);
+    const member = state.team.find(t => String(t.MemberId) === String(key));
     if (action === 'edit-team') {
       const body = document.getElementById('team-body');
       body.querySelectorAll('tr[data-editing="true"]').forEach(tr => {
-        const orig = state.team.find(t => t.Initials === tr.dataset.key);
+        const orig = state.team.find(t => String(t.MemberId) === String(tr.dataset.key));
         if (orig) tr.outerHTML = teamRowHtml(orig, false);
       });
       const row = body.querySelector(`tr[data-key="${cssEscape(key)}"]`);
@@ -352,16 +372,18 @@
     if (action === 'save-team') {
       const row = document.querySelector(`#team-body tr[data-key="${cssEscape(key)}"][data-editing="true"]`);
       if (!row) return;
+      const newMemberId = row.querySelector('[data-field="MemberId"]').value.trim();
       const newInitials = row.querySelector('[data-field="Initials"]').value.trim();
       const newName = row.querySelector('[data-field="Name"]').value.trim();
       const newRole = row.querySelector('[data-field="Role"]').value.trim();
-      if (!newInitials || !newName) {
-        toast('Initials and Name are required', 'error');
+      if (!newMemberId || !newInitials || !newName) {
+        toast('Member ID, Initials, and Name are required', 'error');
         return;
       }
       try {
         await call('updateTeamMember', {
-          OriginalInitials: key,
+          OriginalMemberId: key,
+          MemberId: newMemberId,
           Initials: newInitials,
           Name: newName,
           Role: newRole
@@ -375,10 +397,10 @@
       return;
     }
     if (action === 'delete-team') {
-      if (!confirm('Remove ' + key + '?')) return;
+      if (!confirm('Remove this member? Cases linked to them will keep their MemberId until reassigned.')) return;
       try {
         await call('deleteTeamMember', key);
-        state.team = state.team.filter(t => t.Initials !== key);
+        state.team = state.team.filter(t => String(t.MemberId) !== String(key));
         renderTeam();
         renderInitialsFilter();
         toast('Removed', 'success');

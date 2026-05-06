@@ -9,17 +9,20 @@
  *   3. Deploy -> New deployment -> Web app.
  *
  * Sheets (auto-created on first run):
- *   - Cases:        ID | Initials | MainLink | <dynamic custom columns...>
- *   - TeamMembers:  Initials | Name | Role
+ *   - Cases:        ID | MemberId | MainLink | <dynamic custom columns...>
+ *   - TeamMembers:  MemberId | Initials | Name | Role
  *   - Columns:      ColumnId | ColumnName | ColumnType | Options | Order
+ *
+ * Cases link to team members by MemberId (required). Initials are kept as a
+ * display label only; renaming initials does not break case linkage.
  */
 
 const CASES_SHEET = 'Cases';
 const TEAM_SHEET = 'TeamMembers';
 const COLUMNS_SHEET = 'Columns';
 
-const CASES_FIXED_HEADERS = ['ID', 'Initials', 'MainLink'];
-const TEAM_HEADERS = ['Initials', 'Name', 'Role'];
+const CASES_FIXED_HEADERS = ['ID', 'MemberId', 'MainLink'];
+const TEAM_HEADERS = ['MemberId', 'Initials', 'Name', 'Role'];
 const COLUMNS_HEADERS = ['ColumnId', 'ColumnName', 'ColumnType', 'Options', 'Order'];
 
 const COLUMN_TYPES = ['text', 'number', 'date', 'link', 'dropdown', 'checkbox'];
@@ -80,7 +83,60 @@ function ensureSchema_() {
   getOrCreateSheet_(ss, CASES_SHEET, CASES_FIXED_HEADERS);
   getOrCreateSheet_(ss, TEAM_SHEET, TEAM_HEADERS);
   getOrCreateSheet_(ss, COLUMNS_SHEET, COLUMNS_HEADERS);
+  migrateInitialsToMemberId_();
   syncCasesHeaders_();
+}
+
+/**
+ * Upgrade sheets created under the previous schema (Initials as primary key)
+ * by introducing MemberId as the foreign key in Cases and primary key in
+ * TeamMembers. Idempotent: returns early if MemberId is already present.
+ */
+function migrateInitialsToMemberId_() {
+  const ss = getSpreadsheet_();
+  const team = ss.getSheetByName(TEAM_SHEET);
+  if (!team) return;
+  const lastCol = team.getLastColumn();
+  if (lastCol < 1) return;
+  const headers = team.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+  if (headers.indexOf('MemberId') !== -1) return; // already migrated
+  if (headers[0] !== 'Initials') return; // unknown shape; leave alone
+
+  const lastRow = team.getLastRow();
+  const initialsToId = {};
+  team.insertColumnBefore(1);
+  team.getRange(1, 1).setValue('MemberId');
+  team.getRange(1, 1).setFontWeight('bold');
+  if (lastRow >= 2) {
+    const initialsCol = team.getRange(2, 2, lastRow - 1, 1).getValues();
+    const ids = [];
+    for (let i = 0; i < initialsCol.length; i++) {
+      const init = String(initialsCol[i][0]).trim().toUpperCase();
+      const id = Utilities.getUuid();
+      ids.push([id]);
+      if (init) initialsToId[init] = id;
+    }
+    team.getRange(2, 1, ids.length, 1).setValues(ids);
+  }
+
+  const cases = ss.getSheetByName(CASES_SHEET);
+  if (!cases) return;
+  const cLastCol = cases.getLastColumn();
+  if (cLastCol < 1) return;
+  const cHeaders = cases.getRange(1, 1, 1, cLastCol).getValues()[0].map(String);
+  const idx = cHeaders.indexOf('Initials');
+  if (idx === -1) return;
+  cases.getRange(1, idx + 1).setValue('MemberId');
+  const cLastRow = cases.getLastRow();
+  if (cLastRow >= 2) {
+    const range = cases.getRange(2, idx + 1, cLastRow - 1, 1);
+    const vals = range.getValues();
+    for (let i = 0; i < vals.length; i++) {
+      const init = String(vals[i][0]).trim().toUpperCase();
+      if (init && initialsToId[init]) vals[i][0] = initialsToId[init];
+    }
+    range.setValues(vals);
+  }
 }
 
 function syncCasesHeaders_() {
@@ -135,7 +191,6 @@ function getCases() {
   const ss = getSpreadsheet_();
   const sheet = getOrCreateSheet_(ss, CASES_SHEET, CASES_FIXED_HEADERS);
   return readSheet_(sheet).rows.map(r => {
-    if (r.MainLink instanceof Date) r.MainLink = r.MainLink.toISOString();
     Object.keys(r).forEach(k => { if (r[k] instanceof Date) r[k] = r[k].toISOString(); });
     return r;
   });
@@ -199,99 +254,110 @@ function getTeamMembers() {
   return readSheet_(sheet).rows;
 }
 
+/**
+ * Create or update a team member, keyed by MemberId.
+ * MemberId is required; Initials and Name are required for display.
+ */
 function saveTeamMember(payload) {
   ensureSchema_();
-  if (!payload || !payload.Initials) throw new Error('Initials are required');
-  const initials = String(payload.Initials).trim().toUpperCase();
+  if (!payload) throw new Error('payload required');
+  const memberId = String(payload.MemberId || '').trim();
+  if (!memberId) throw new Error('MemberId is required');
+  const initials = String(payload.Initials || '').trim().toUpperCase();
   const name = String(payload.Name || '').trim();
   const role = String(payload.Role || '').trim();
+  if (!initials) throw new Error('Initials are required');
+  if (!name) throw new Error('Name is required');
+
   const ss = getSpreadsheet_();
   const sheet = ss.getSheetByName(TEAM_SHEET);
   const lastRow = sheet.getLastRow();
   if (lastRow >= 2) {
-    const range = sheet.getRange(2, 1, lastRow - 1, TEAM_HEADERS.length).getValues();
-    for (let i = 0; i < range.length; i++) {
-      if (String(range[i][0]).trim().toUpperCase() === initials) {
-        sheet.getRange(i + 2, 1, 1, TEAM_HEADERS.length).setValues([[initials, name, role]]);
+    const values = sheet.getRange(2, 1, lastRow - 1, TEAM_HEADERS.length).getValues();
+    for (let i = 0; i < values.length; i++) {
+      if (String(values[i][0]).trim() === memberId) {
+        sheet.getRange(i + 2, 1, 1, TEAM_HEADERS.length)
+          .setValues([[memberId, initials, name, role]]);
         return { ok: true, updated: true };
       }
     }
   }
-  sheet.appendRow([initials, name, role]);
+  sheet.appendRow([memberId, initials, name, role]);
   return { ok: true, created: true };
 }
 
 /**
- * Update an existing team member identified by OriginalInitials.
- * If the initials change, the row is renamed and any cases that reference
- * the old initials are updated to the new ones to preserve linkage.
+ * Update a team member identified by OriginalMemberId. If MemberId changes,
+ * the row is renamed and any cases linked by the old MemberId are updated
+ * so linkage is preserved.
  */
 function updateTeamMember(payload) {
   ensureSchema_();
-  if (!payload || !payload.OriginalInitials) {
-    throw new Error('updateTeamMember requires OriginalInitials');
+  if (!payload || !payload.OriginalMemberId) {
+    throw new Error('updateTeamMember requires OriginalMemberId');
   }
-  if (!payload.Initials) throw new Error('Initials are required');
-
-  const original = String(payload.OriginalInitials).trim().toUpperCase();
-  const newInitials = String(payload.Initials).trim().toUpperCase();
+  const original = String(payload.OriginalMemberId).trim();
+  const newId = String(payload.MemberId || '').trim();
+  const initials = String(payload.Initials || '').trim().toUpperCase();
   const name = String(payload.Name || '').trim();
   const role = String(payload.Role || '').trim();
-  if (!newInitials) throw new Error('Initials cannot be empty');
+  if (!newId) throw new Error('MemberId is required');
+  if (!initials) throw new Error('Initials are required');
+  if (!name) throw new Error('Name is required');
 
   const ss = getSpreadsheet_();
   const sheet = ss.getSheetByName(TEAM_SHEET);
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) throw new Error('No team members to update');
-
   const values = sheet.getRange(2, 1, lastRow - 1, TEAM_HEADERS.length).getValues();
 
-  if (original !== newInitials) {
-    const conflict = values.some(r => String(r[0]).trim().toUpperCase() === newInitials);
-    if (conflict) throw new Error('A team member with initials "' + newInitials + '" already exists');
+  if (original !== newId) {
+    const conflict = values.some(r => String(r[0]).trim() === newId);
+    if (conflict) throw new Error('A team member with MemberId "' + newId + '" already exists');
   }
 
   for (let i = 0; i < values.length; i++) {
-    if (String(values[i][0]).trim().toUpperCase() === original) {
-      sheet.getRange(i + 2, 1, 1, TEAM_HEADERS.length).setValues([[newInitials, name, role]]);
-      if (original !== newInitials) updateCasesInitials_(original, newInitials);
+    if (String(values[i][0]).trim() === original) {
+      sheet.getRange(i + 2, 1, 1, TEAM_HEADERS.length)
+        .setValues([[newId, initials, name, role]]);
+      if (original !== newId) updateCasesMemberId_(original, newId);
       return { ok: true };
     }
   }
   throw new Error('Team member not found: ' + original);
 }
 
-function updateCasesInitials_(oldInitials, newInitials) {
+function updateCasesMemberId_(oldId, newId) {
   const ss = getSpreadsheet_();
   const sheet = ss.getSheetByName(CASES_SHEET);
   const lastRow = sheet.getLastRow();
   const lastCol = sheet.getLastColumn();
   if (lastRow < 2 || lastCol < 1) return;
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-  const idx = headers.indexOf('Initials');
+  const idx = headers.indexOf('MemberId');
   if (idx === -1) return;
   const range = sheet.getRange(2, idx + 1, lastRow - 1, 1);
   const cells = range.getValues();
   let changed = false;
   for (let i = 0; i < cells.length; i++) {
-    if (String(cells[i][0]).trim().toUpperCase() === oldInitials) {
-      cells[i][0] = newInitials;
+    if (String(cells[i][0]).trim() === oldId) {
+      cells[i][0] = newId;
       changed = true;
     }
   }
   if (changed) range.setValues(cells);
 }
 
-function deleteTeamMember(initials) {
-  if (!initials) throw new Error('initials required');
-  const target = String(initials).trim().toUpperCase();
+function deleteTeamMember(memberId) {
+  if (!memberId) throw new Error('memberId required');
+  const target = String(memberId).trim();
   const ss = getSpreadsheet_();
   const sheet = ss.getSheetByName(TEAM_SHEET);
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return { ok: true };
   const values = sheet.getRange(2, 1, lastRow - 1, TEAM_HEADERS.length).getValues();
   for (let i = 0; i < values.length; i++) {
-    if (String(values[i][0]).trim().toUpperCase() === target) {
+    if (String(values[i][0]).trim() === target) {
       sheet.deleteRow(i + 2);
       return { ok: true };
     }

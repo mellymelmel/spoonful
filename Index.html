@@ -39,14 +39,16 @@
       <div class="settings-grid">
         <div class="card">
           <h2>Team Members</h2>
+          <p class="muted small">Member ID is required and links cases to members. Initials and name are display labels.</p>
           <form id="team-form" class="inline-form">
+            <input type="text" name="MemberId" placeholder="Member ID" required autocomplete="off">
             <input type="text" name="Initials" placeholder="Initials" required maxlength="6" autocomplete="off">
             <input type="text" name="Name" placeholder="Full name" required autocomplete="off">
             <input type="text" name="Role" placeholder="Role" autocomplete="off">
             <button type="submit" class="primary">Save</button>
           </form>
           <table class="settings-table">
-            <thead><tr><th>Initials</th><th>Name</th><th>Role</th><th></th></tr></thead>
+            <thead><tr><th>Member ID</th><th>Initials</th><th>Name</th><th>Role</th><th></th></tr></thead>
             <tbody id="team-body"></tbody>
           </table>
         </div>

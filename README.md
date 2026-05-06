@@ -17,9 +17,16 @@ role) and the column layout.
 
 ## Backend sheets (auto-created on first run)
 
-- **Cases** — `ID | Initials | MainLink | <custom columns...>`
-- **TeamMembers** — `Initials | Name | Role`
+- **Cases** — `ID | MemberId | MainLink | <custom columns...>`
+- **TeamMembers** — `MemberId | Initials | Name | Role`
 - **Columns** — `ColumnId | ColumnName | ColumnType | Options | Order`
+
+`MemberId` is the required primary key on `TeamMembers` and the foreign key
+that links a case to a member. `Initials` and `Name` are display labels.
+Sheets created under the previous schema (Initials as primary key) are
+auto-migrated on first load: a `MemberId` column is inserted, UUIDs are
+generated, and the `Cases` sheet's `Initials` column is rewritten to
+`MemberId`.
 
 Supported column types: `text`, `number`, `date`, `link`, `dropdown`, `checkbox`.
 For `dropdown`, fill the **Options** field with a comma-separated list.
