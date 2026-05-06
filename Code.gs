@@ -191,11 +191,13 @@ function ensureCasesHeaders_(sheet) {
 
 function getDashboardData() {
   ensureSchema_();
+  const auto = autoReconcileDuplicates();
   return {
     cases: getCases(),
     team: getTeamMembers(),
     columns: getCustomColumns(),
-    columnTypes: COLUMN_TYPES
+    columnTypes: COLUMN_TYPES,
+    autoReconciled: auto
   };
 }
 
@@ -481,6 +483,40 @@ function reorderColumns(orderedIds) {
 }
 
 /* ---------- Duplicate detection ---------- */
+
+/**
+ * Auto-resolve duplicate groups where every designated column value matches
+ * across all rows in the group. The first row is kept; the rest are deleted.
+ * Groups with any differing column are left alone for manual reconciliation.
+ * Returns { deleted, groups } counts.
+ */
+function autoReconcileDuplicates() {
+  const groups = findDuplicateCases();
+  if (!groups || groups.length === 0) return { deleted: 0, groups: 0 };
+  const designated = CASES_FIXED_HEADERS.concat(getCustomColumns_().map(c => c.ColumnName));
+  const compareKeys = designated.filter(k => k !== 'ID');
+  let deleted = 0;
+  let groupsResolved = 0;
+  groups.forEach(g => {
+    const rows = g.rows;
+    const first = rows[0];
+    const allMatch = rows.every(r =>
+      compareKeys.every(k => normalizeForCompare_(r[k]) === normalizeForCompare_(first[k]))
+    );
+    if (!allMatch) return;
+    for (let i = 1; i < rows.length; i++) {
+      deleteCase(rows[i].ID);
+      deleted++;
+    }
+    groupsResolved++;
+  });
+  return { deleted: deleted, groups: groupsResolved };
+}
+
+function normalizeForCompare_(v) {
+  if (v == null) return '';
+  return String(v).trim();
+}
 
 /**
  * Group cases that share a Main Link (case-insensitive, ignoring trailing

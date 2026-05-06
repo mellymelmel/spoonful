@@ -49,6 +49,10 @@
     state.columnTypes = data.columnTypes || state.columnTypes;
     renderAll();
     refreshDupeBanner();
+    const auto = data && data.autoReconciled;
+    if (auto && auto.deleted > 0) {
+      toast(`Auto-merged ${auto.deleted} identical duplicate${auto.deleted === 1 ? '' : 's'}`, 'success');
+    }
   }
 
   function renderAll() {

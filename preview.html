@@ -361,8 +361,10 @@
         { ID: uuid(), MemberId: 'M001', MainLink: 'https://example.com/case/123', Status: 'Open', Priority: 'High' },
         { ID: uuid(), MemberId: 'M002', MainLink: 'https://example.com/case/124', Status: 'In Review', Priority: 'Medium' },
         { ID: uuid(), MemberId: 'M001', MainLink: 'https://example.com/case/125', Status: 'Closed', Priority: 'Low' },
-        // intentional duplicate of the first row's MainLink to demo Reconcile
-        { ID: uuid(), MemberId: 'M003', MainLink: 'https://example.com/case/123', Status: 'Open', Priority: 'Medium' }
+        // Mismatched dup of /case/123 (different member + priority) — needs manual Reconcile.
+        { ID: uuid(), MemberId: 'M003', MainLink: 'https://example.com/case/123', Status: 'Open', Priority: 'Medium' },
+        // Identical dup of /case/124 — auto-merged on load.
+        { ID: uuid(), MemberId: 'M002', MainLink: 'https://example.com/case/124', Status: 'In Review', Priority: 'Medium' }
       ],
       team: [
         { MemberId: 'M001', Initials: 'AB', Name: 'Alice Brown', Role: 'Investigator' },
@@ -386,12 +388,37 @@
 
   const handlers = {
     getDashboardData() {
+      const auto = handlers.autoReconcileDuplicates();
       return {
         cases: handlers.getCases(),
         team: handlers.getTeamMembers(),
         columns: handlers.getCustomColumns(),
-        columnTypes: COLUMN_TYPES
+        columnTypes: COLUMN_TYPES,
+        autoReconciled: auto
       };
+    },
+    autoReconcileDuplicates() {
+      const groups = handlers.findDuplicateCases();
+      if (!groups.length) return { deleted: 0, groups: 0 };
+      const db = load();
+      const customCols = customColumns().map(c => c.ColumnName);
+      const compareKeys = ['MemberId', 'MainLink'].concat(customCols);
+      const norm = v => v == null ? '' : String(v).trim();
+      const idsToDelete = {};
+      let groupsResolved = 0;
+      groups.forEach(g => {
+        const rows = g.rows;
+        const first = rows[0];
+        const allMatch = rows.every(r => compareKeys.every(k => norm(r[k]) === norm(first[k])));
+        if (!allMatch) return;
+        for (let i = 1; i < rows.length; i++) idsToDelete[String(rows[i].ID)] = true;
+        groupsResolved++;
+      });
+      const deletedIds = Object.keys(idsToDelete);
+      if (deletedIds.length === 0) return { deleted: 0, groups: 0 };
+      db.cases = db.cases.filter(c => !idsToDelete[String(c.ID)]);
+      save(db);
+      return { deleted: deletedIds.length, groups: groupsResolved };
     },
     getCases() {
       const db = load();
@@ -742,6 +769,10 @@
     state.columnTypes = data.columnTypes || state.columnTypes;
     renderAll();
     refreshDupeBanner();
+    const auto = data && data.autoReconciled;
+    if (auto && auto.deleted > 0) {
+      toast(`Auto-merged ${auto.deleted} identical duplicate${auto.deleted === 1 ? '' : 's'}`, 'success');
+    }
   }
 
   function renderAll() {
